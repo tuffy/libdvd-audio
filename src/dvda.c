@@ -5,6 +5,8 @@
 #include "bitstream.h"
 #include "audio_ts.h"
 
+#define SECTOR_SIZE 2048
+
 struct DVDA_s {
     char *audio_ts_path;
     char *device;
@@ -134,7 +136,7 @@ dvda_open_titleset(DVDA_t* dvda, unsigned titleset_num)
             br_abort(bs);
         }
 
-        bs->seek(bs, 2048, BS_SEEK_SET);
+        bs->seek(bs, SECTOR_SIZE, BS_SEEK_SET);
 
         bs->parse(bs, "16u 16p 32u",
                   &titleset->title_count, &last_byte_address);
@@ -185,7 +187,7 @@ dvda_open_title(DVDA_Titleset_t* titleset, unsigned title_num)
     }
 
     if (!setjmp(*br_try(bs))) {
-        bs->seek(bs, 2048, BS_SEEK_SET);
+        bs->seek(bs, SECTOR_SIZE, BS_SEEK_SET);
         bs->parse(bs, "16u 16p 32p", &title_count);
         assert(title_count == titleset->title_count);
         for (i = 0; i < title_count; i++) {
@@ -197,13 +199,14 @@ dvda_open_title(DVDA_Titleset_t* titleset, unsigned title_num)
                 unsigned sector_pointers_offset;
                 unsigned i;
 
-                bs->seek(bs, 2048 + title_table_offset, BS_SEEK_SET);
+                bs->seek(bs, SECTOR_SIZE + title_table_offset, BS_SEEK_SET);
                 bs->parse(bs, "16p 8u 8u 32u 32p 16u 16p",
                           &title->track_count,
                           &title->index_count,
                           &title->pts_length,
                           &sector_pointers_offset);
 
+                /*populate tracks*/
                 for (i = 0; i < title->track_count; i++) {
                     bs->parse(bs, "32p 8u 8p 32u 32u 48p",
                               &(title->tracks[i].index_number),
@@ -211,7 +214,23 @@ dvda_open_title(DVDA_Titleset_t* titleset, unsigned title_num)
                               &(title->tracks[i].pts_length));
                 }
 
-                /*FIXME - populate indexes*/
+                /*populate indexes*/
+                bs->seek(bs,
+                         SECTOR_SIZE +
+                         title_table_offset +
+                         sector_pointers_offset,
+                         BS_SEEK_SET);
+                for (i = 0; i < title->index_count; i++) {
+                    unsigned index_id;
+                    bs->parse(bs, "32u 32u 32u",
+                              &index_id,
+                              &(title->indexes[i].first_sector),
+                              &(title->indexes[i].last_sector));
+                    if (index_id != 0x1000000) {
+                        /*invalid index ID*/
+                        br_abort(bs);
+                    }
+                }
 
                 br_etry(bs);
                 bs->close(bs);
@@ -244,6 +263,12 @@ unsigned
 dvda_track_count(const DVDA_Title_t* title)
 {
     return title->track_count;
+}
+
+unsigned
+dvda_title_pts_length(const DVDA_Title_t* title)
+{
+    return title->pts_length;
 }
 
 DVDA_Track_t*
@@ -281,6 +306,20 @@ unsigned
 dvda_track_pts_length(const DVDA_Track_t* track)
 {
     return track->pts_length;
+}
+
+unsigned
+dvda_track_first_sector(const DVDA_Title_t* title,
+                        const DVDA_Track_t* track)
+{
+    return title->indexes[track->index_number - 1].first_sector;
+}
+
+unsigned
+dvda_track_last_sector(const DVDA_Title_t* title,
+                       const DVDA_Track_t* track)
+{
+    return title->indexes[track->index_number - 1].last_sector;
 }
 
 /*******************************************************************

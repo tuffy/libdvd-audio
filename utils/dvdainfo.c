@@ -5,10 +5,8 @@ int main(int argc, char *argv[])
 {
     DVDA_t *dvda = dvda_open(argv[1], NULL);
     DVDA_Titleset_t *titleset;
-    DVDA_Title_t *title;
     const unsigned titleset_num = 1;
-    const unsigned title_num = 1;
-    unsigned i;
+    unsigned title_num;
 
     if (!dvda) {
         printf("missing or invalid AUDIO_TS.IFO file in AUDIO_TS directory\n");
@@ -30,36 +28,47 @@ int main(int argc, char *argv[])
     printf("got titleset %u ok\n", titleset_num);
     printf("titleset as %u titles\n", dvda_title_count(titleset));
 
-    title = dvda_open_title(titleset, title_num);
+    for (title_num = 1; title_num <= dvda_title_count(titleset); title_num++) {
+        unsigned track_num;
+        DVDA_Title_t *title = dvda_open_title(titleset, title_num);
 
-    if (!title) {
-        printf("missing or invalid title %u\n", title_num);
-        dvda_close_titleset(titleset);
-        return 1;
-    }
-
-    printf("got title %u ok\n", title_num);
-    printf("title has %u tracks\n", dvda_track_count(title));
-
-    for (i = 0; i < dvda_track_count(title); i++) {
-        const unsigned track_num = i + 1;
-        DVDA_Track_t* track = dvda_open_track(title, track_num);
-
-        if (!track) {
-            printf("missing or invalid track %u\n", track_num);
-            dvda_close_title(title);
+        if (!title) {
+            printf("missing or invalid title %u\n", title_num);
             dvda_close_titleset(titleset);
             return 1;
         }
 
-        printf("got track %u ok\n", track_num);
-        printf("PTS index  : %u\n", dvda_track_pts_index(track));
-        printf("PTS length : %u\n", dvda_track_pts_length(track));
+        printf("got title %u ok\n", title_num);
+        printf("title PTS length : %u\n", dvda_title_pts_length(title));
+        printf("title has %u tracks\n", dvda_track_count(title));
 
-        dvda_close_track(track);
+        for (track_num = 1; track_num <= dvda_track_count(title); track_num++) {
+            DVDA_Track_t* track = dvda_open_track(title, track_num);
+
+            if (!track) {
+                printf("missing or invalid track %u\n", track_num);
+                dvda_close_title(title);
+                dvda_close_titleset(titleset);
+                return 1;
+            }
+
+            printf("got track %u ok\n",
+                   track_num);
+            printf("PTS index    : %u\n",
+                   dvda_track_pts_index(track));
+            printf("PTS length   : %u\n",
+                   dvda_track_pts_length(track));
+            printf("first sector : 0x%x\n",
+                   dvda_track_first_sector(title, track));
+            printf("last sector  : 0x%x\n",
+                   dvda_track_last_sector(title, track));
+
+            dvda_close_track(track);
+        }
+
+        dvda_close_title(title);
     }
 
-    dvda_close_title(title);
     dvda_close_titleset(titleset);
 
     return 0;

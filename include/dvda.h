@@ -58,6 +58,9 @@ dvda_close_title(DVDA_Title_t* title);
 unsigned
 dvda_track_count(const DVDA_Title_t* title);
 
+unsigned
+dvda_title_pts_length(const DVDA_Title_t* title);
+
 /*given a track number (starting from 1)
   returns a DVDA_Track_t* or NULL if the track is not found
 
@@ -74,6 +77,14 @@ dvda_track_pts_index(const DVDA_Track_t* track);
 
 unsigned
 dvda_track_pts_length(const DVDA_Track_t* track);
+
+unsigned
+dvda_track_first_sector(const DVDA_Title_t* title,
+                        const DVDA_Track_t* track);
+
+unsigned
+dvda_track_last_sector(const DVDA_Title_t* title,
+                       const DVDA_Track_t* track);
 
 /*given an index number,
   returns a DVDA_Index_t* or NULL if the index is not found
