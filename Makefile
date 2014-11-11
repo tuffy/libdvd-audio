@@ -5,6 +5,8 @@ INCLUDE = include
 UTILS = utils
 
 DVDA_OBJS = dvda.o \
+aob.o \
+audio_ts.o \
 bitstream.o \
 huffman.o \
 func_io.o \
@@ -23,6 +25,12 @@ dvda.a: $(DVDA_OBJS)
 
 dvda.o: $(INCLUDE)/dvda.h $(SRC)/dvda.c
 	$(CC) $(FLAGS) -c $(SRC)/dvda.c -I $(INCLUDE)
+
+aob.o: $(INCLUDE)/aob.h $(SRC)/aob.c
+	$(CC) $(FLAGS) -c $(SRC)/aob.c -I $(INCLUDE)
+
+audio_ts.o: $(SRC)/audio_ts.h $(SRC)/audio_ts.c
+	$(CC) $(FLAGS) -c $(SRC)/audio_ts.c
 
 huffman: $(SRC)/huffman.c $(SRC)/huffman.h parson.o
 	$(CC) $(FLAGS) -o huffman $(SRC)/huffman.c parson.o -DEXECUTABLE
