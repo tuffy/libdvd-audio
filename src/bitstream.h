@@ -473,6 +473,16 @@ br_open_buffer(const uint8_t *buffer,
 BitstreamQueue*
 br_open_queue(bs_endianness endianness);
 
+static inline BitstreamQueue*
+br_open_queue_populated(const uint8_t *buffer,
+                        unsigned buffer_size,
+                        bs_endianness endianness)
+{
+    BitstreamQueue* queue = br_open_queue(endianness);
+    queue->push(queue, buffer_size, buffer);
+    return queue;
+}
+
 /*int read(void* user_data, struct bs_buffer* buffer)
   where "buffer" is where read output will be placed
   using buf_putc, buf_append, etc.

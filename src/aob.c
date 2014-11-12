@@ -49,6 +49,7 @@ aob_seek_sector(struct AOB *aob, unsigned sector_number)
     } else {
         aob->current_sector = aob->total_sectors;
     }
+    fseek(aob->file, aob->current_sector * SECTOR_SIZE, SEEK_SET);
 }
 
 static inline struct AOB*

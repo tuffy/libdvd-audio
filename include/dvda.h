@@ -3,7 +3,6 @@ struct DVDA_Titleset_s;
 struct DVDA_Title_s;
 struct DVDA_Track_s;
 struct DVDA_Index_s;
-struct DVDA_Titleset_Reader_s;
 struct DVDA_Title_Reader_s;
 
 typedef struct DVDA_s DVDA;
@@ -11,7 +10,6 @@ typedef struct DVDA_Titleset_s DVDA_Titleset;
 typedef struct DVDA_Title_s DVDA_Title;
 typedef struct DVDA_Track_s DVDA_Track;
 typedef struct DVDA_Index_s DVDA_Index;
-typedef struct DVDA_Titleset_Reader_s DVDA_Titleset_Reader;
 typedef struct DVDA_Title_Reader_s DVDA_Title_Reader;
 
 typedef enum {DVDA_PCM, DVDA_MLP} dvda_codec_t;
@@ -48,18 +46,6 @@ dvda_close_titleset(DVDA_Titleset* titleset);
 unsigned
 dvda_title_count(const DVDA_Titleset* titleset);
 
-/*given a title set number (starting from 1)
-  return a DVDA_Titleset_Reader or NULL if the AOB files
-  are missing or invalid
-
-  the DVDA_Titleset_Reader should be closed with dvda_close_titleset_reader()
-  when no longer needed*/
-DVDA_Titleset_Reader*
-dvda_open_titleset_reader(DVDA* dvda, unsigned titleset);
-
-void
-dvda_close_titleset_reader(DVDA_Titleset_Reader* reader);
-
 /*given a title number (starting from 1)
   returns a DVDA_Title or NULL if the title is not found
 
@@ -79,13 +65,13 @@ dvda_track_count(const DVDA_Title* title);
 unsigned
 dvda_title_pts_length(const DVDA_Title* title);
 
-/*given a title number (starting from 1)
-  returns a DVDA_Titlte_Reader or NULL if the title is not found
+/*given a DVDA_Title object, returns a DVDA_Title_Reader
+  or NULL if some error occurs
 
   the DVDA_Title_Reader should be closed with dvda_close_title_reader()
   when no longer needed*/
 DVDA_Title_Reader*
-dvda_open_title_reader(DVDA_Titleset_Reader* titleset_reader, unsigned title);
+dvda_open_title_reader(DVDA* dvda, unsigned titleset, DVDA_Title* title);
 
 void
 dvda_close_title_reader(DVDA_Title_Reader* title_reader);
