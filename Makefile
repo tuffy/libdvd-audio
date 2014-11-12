@@ -8,6 +8,7 @@ DVDA_OBJS = dvda.o \
 aob.o \
 audio_ts.o \
 bitstream.o \
+array.o \
 huffman.o \
 func_io.o \
 mini-gmp.o
@@ -26,8 +27,8 @@ dvda.a: $(DVDA_OBJS)
 dvda.o: $(INCLUDE)/dvda.h $(SRC)/dvda.c
 	$(CC) $(FLAGS) -c $(SRC)/dvda.c -I $(INCLUDE)
 
-aob.o: $(INCLUDE)/aob.h $(SRC)/aob.c
-	$(CC) $(FLAGS) -c $(SRC)/aob.c -I $(INCLUDE)
+aob.o: $(SRC)/aob.h $(SRC)/aob.c
+	$(CC) $(FLAGS) -c $(SRC)/aob.c
 
 audio_ts.o: $(SRC)/audio_ts.h $(SRC)/audio_ts.c
 	$(CC) $(FLAGS) -c $(SRC)/audio_ts.c
@@ -37,6 +38,9 @@ huffman: $(SRC)/huffman.c $(SRC)/huffman.h parson.o
 
 bitstream.o: $(SRC)/bitstream.c $(SRC)/bitstream.h
 	$(CC) $(FLAGS) -c $(SRC)/bitstream.c
+
+array.o: $(SRC)/array.h $(SRC)/array.c
+	$(CC) $(FLAGS) -c $(SRC)/array.c
 
 huffman.o: $(SRC)/huffman.c $(SRC)/huffman.h
 	$(CC) $(FLAGS) -c $(SRC)/huffman.c -DSTANDALONE
