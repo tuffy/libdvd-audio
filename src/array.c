@@ -851,26 +851,26 @@ TYPE##_cross_split(const TYPE *self, unsigned count,           \
         head->reset(head);                                     \
         for (i = 0; i < self->len; i++) {                      \
             self->_[i]->split(self->_[i],                      \
-                               count,                          \
-                               head->append(head),             \
-                               tail->_[i]);                    \
+                              count,                           \
+                              head->append(head),              \
+                              tail->_[i]);                     \
         }                                                      \
     } else if ((head == self) && (tail != self)) {             \
         tail->reset(tail);                                     \
         for (i = 0; i < self->len; i++) {                      \
             self->_[i]->split(self->_[i],                      \
-                               count,                          \
-                               head->_[i],                     \
-                               tail->append(tail));            \
+                              count,                           \
+                              head->_[i],                      \
+                              tail->append(tail));             \
         }                                                      \
     } else {                                                   \
         head->reset(head);                                     \
         tail->reset(tail);                                     \
         for (i = 0; i < self->len; i++) {                      \
             self->_[i]->split(self->_[i],                      \
-                               count,                          \
-                               head->append(head),             \
-                               tail->append(tail));            \
+                              count,                           \
+                              head->append(head),              \
+                              tail->append(tail));             \
         }                                                      \
     }                                                          \
 }                                                              \

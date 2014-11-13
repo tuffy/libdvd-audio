@@ -7,6 +7,7 @@ UTILS = utils
 DVDA_OBJS = dvda.o \
 aob.o \
 audio_ts.o \
+pcm.o \
 bitstream.o \
 array.o \
 huffman.o \
@@ -32,6 +33,9 @@ aob.o: $(SRC)/aob.h $(SRC)/aob.c
 
 audio_ts.o: $(SRC)/audio_ts.h $(SRC)/audio_ts.c
 	$(CC) $(FLAGS) -c $(SRC)/audio_ts.c
+
+pcm.o: $(SRC)/pcm.h $(SRC)/pcm.c
+	$(CC) $(FLAGS) -c $(SRC)/pcm.c
 
 huffman: $(SRC)/huffman.c $(SRC)/huffman.h parson.o
 	$(CC) $(FLAGS) -o huffman $(SRC)/huffman.c parson.o -DEXECUTABLE
