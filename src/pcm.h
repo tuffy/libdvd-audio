@@ -22,7 +22,7 @@ dvda_close_pcmdecoder(PCMDecoder* decoder);
   may return 0 at the end of stream or if a read error occurs*/
 unsigned
 dvda_pcmdecoder_decode_sector(PCMDecoder* decoder,
-                              const uint8_t* sector,
+                              const uint8_t sector[],
                               aa_int* samples);
 
 /*decodes all leftover data to samples
@@ -33,6 +33,7 @@ unsigned
 dvda_pcmdecoder_flush(PCMDecoder* decoder,
                       aa_int* samples);
 
+/*decodes the PCM stream parameters from the sector*/
 void
 dvda_pcmdecoder_decode_params(BitstreamReader *sector_reader,
                               struct stream_parameters* parameters);

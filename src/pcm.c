@@ -74,19 +74,20 @@ dvda_close_pcmdecoder(PCMDecoder* decoder)
 
 unsigned
 dvda_pcmdecoder_decode_sector(PCMDecoder* decoder,
-                              const uint8_t* sector,
+                              const uint8_t sector[],
                               aa_int* samples)
 {
     BitstreamQueue* sector_data = decoder->sector_data;
     BitstreamReader* sector_reader = (BitstreamReader*)sector_data;
-    uint64_t pts;
-    unsigned SCR_extension;
-    unsigned bitrate;
 
     sector_data->push(sector_data, SECTOR_SIZE, sector);
 
     /*skip over the pack header*/
     if (!setjmp(*br_try(sector_reader))) {
+        uint64_t pts;
+        unsigned SCR_extension;
+        unsigned bitrate;
+
         read_pack_header(sector_reader, &pts, &SCR_extension, &bitrate);
         br_etry(sector_reader);
     } else {
@@ -100,6 +101,7 @@ dvda_pcmdecoder_decode_sector(PCMDecoder* decoder,
         unsigned packet_length = 0;
         BitstreamReader* packet_reader;
 
+        /*for each packet*/
         if (!setjmp(*br_try(sector_reader))) {
             if (read_packet_header(sector_reader, &stream_id, &packet_length)) {
                 /*invalid start code*/
@@ -116,8 +118,8 @@ dvda_pcmdecoder_decode_sector(PCMDecoder* decoder,
             return 0;
         }
 
-        /*for each audio packet*/
         if (!setjmp(*br_try(packet_reader))) {
+            /*if packet is audio*/
             if (stream_id == 0xBD) {
                 unsigned pad_1_size;
                 unsigned codec_id;
@@ -128,7 +130,7 @@ dvda_pcmdecoder_decode_sector(PCMDecoder* decoder,
                 packet_reader->parse(packet_reader, "8u 8p 8p 8u",
                                      &codec_id, &pad_2_size);
 
-                /*if the audio packet is PCM*/
+                /*and if the audio packet is PCM*/
                 if (codec_id == 0xA0) {
                     struct stream_parameters parameters;
 

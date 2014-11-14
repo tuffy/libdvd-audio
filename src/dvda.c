@@ -8,6 +8,7 @@
 #include "audio_ts.h"
 #include "aob.h"
 #include "pcm.h"
+#include "mlp.h"
 #include "stream_parameters.h"
 
 #define SECTOR_SIZE 2048
@@ -53,6 +54,7 @@ struct DVDA_Title_Reader_s {
     AOB_Reader* aob_reader;
     union {
         PCMDecoder* pcm;
+        MLPDecoder* mlp;
     } decoder;
 
     dvda_codec_t codec;
@@ -421,7 +423,9 @@ dvda_open_title_reader(DVDA* dvda, unsigned titleset, DVDA_Title* title)
                 unpack_channel_count(stream_parameters.channel_assignment));
         break;
     case DVDA_MLP:
-        /*FIXME*/
+        title_reader->decoder.mlp =
+            dvda_open_mlpdecoder(
+                &stream_parameters);
         break;
     }
 
@@ -451,7 +455,7 @@ dvda_close_title_reader(DVDA_Title_Reader* title_reader)
         dvda_close_pcmdecoder(title_reader->decoder.pcm);
         break;
     case DVDA_MLP:
-        /*FIXME*/
+        dvda_close_mlpdecoder(title_reader->decoder.mlp);
         break;
     }
 
@@ -818,8 +822,9 @@ decode_sector(DVDA_Title_Reader* reader, aa_int* channel_data)
                                                  sector,
                                                  channel_data);
         case DVDA_MLP:
-            /*FIXME*/
-            return 0;
+            return dvda_mlpdecoder_decode_sector(reader->decoder.mlp,
+                                                 sector,
+                                                 channel_data);
         }
     } else {
         /*no more sectors to read, so flush any leftover output*/
@@ -828,7 +833,7 @@ decode_sector(DVDA_Title_Reader* reader, aa_int* channel_data)
         case DVDA_PCM:
             return dvda_pcmdecoder_flush(reader->decoder.pcm, channel_data);
         case DVDA_MLP:
-            /*FIXME*/
+            return dvda_mlpdecoder_flush(reader->decoder.mlp, channel_data);
             return 0;
         }
     }
