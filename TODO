@@ -1,0 +1,22 @@
+# -*- Mode: Org -*-
+* TODO Finish version 1.0
+** DONE Construct basic API
+** DONE Add PCM decoding support
+** TODO Add MLP decoding support
+** TODO Add unprotection support
+** TODO Add licensing text to all files
+** TODO Add versioning to library
+   Ensure major and minor version show up somewhere
+** TODO Add .pc file for pkg-config
+   Make this consistent with other libraries like libcdio
+** TODO Add basic debugging utilities
+   These are stripped-down proof-of-concepts to show off how the library works
+   and can be probed with Valgrind to ensure there's no bugs.
+*** TODO dvda-debug-info
+*** TODO dvda2wav
+** TODO Add library documentation
+*** TODO Add manpage for API
+*** TODO Add RST file for the web
+** TODO Add format documentation
+   Overhaul the documentation on how to read and decode DVD-A discs
+   to be a bit more comprehensive.
