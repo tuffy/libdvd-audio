@@ -343,8 +343,6 @@ dvda_mlpdecoder_decode_sector(MLPDecoder* decoder,
     BitstreamQueue* sector_data = decoder->sector_data;
     BitstreamReader* sector_reader = (BitstreamReader*)sector_data;
 
-    fprintf(stderr, "decoding sector\n");
-
     sector_data->push(sector_data, SECTOR_SIZE, sector);
 
     /*skip over the pack header*/
@@ -467,7 +465,6 @@ read_mlp_frame(BitstreamReader* mlp_data)
 
         mlp_data->parse(mlp_data, "4p 12u 16p", &total_frame_size);
         total_frame_size *= 2;
-        fprintf(stderr, "total frame size : %u\n", total_frame_size);
         mlp_frame = mlp_data->substream(mlp_data, total_frame_size - 4);
         br_etry(mlp_data);
         start->del(start);
@@ -501,7 +498,6 @@ decode_mlp_frame(MLPDecoder* decoder,
             /*ensure new major sync matches previously read one*/
             if (!dvda_params_equal(&(decoder->major_sync.parameters),
                                    &(major_sync.parameters))) {
-                assert(0);
                 return 0;
             }
         } else {
@@ -534,11 +530,19 @@ decode_mlp_frame(MLPDecoder* decoder,
         a_int_reset(substream0->parameters.matrix[m].bypassed_LSB);
 
     /*decode substream 0 bytes to channel data*/
-    pcm_frames[0] = decode_substream(substream0,
-                                     substream_reader,
-                                     decoder->framelist);
-
-    substream_reader->close(substream_reader);
+    if (!setjmp(*br_try(substream_reader))) {
+        pcm_frames[0] = decode_substream(substream0,
+                                         substream_reader,
+                                         decoder->framelist);
+        br_etry(substream_reader);
+        substream_reader->close(substream_reader);
+    } else {
+        /*I/O error decoding substream*/
+        br_etry(substream_reader);
+        substream_reader->close(substream_reader);
+        assert(0);
+        return 0;
+    }
 
     if (!pcm_frames[0]) {
         assert(0);
@@ -595,11 +599,19 @@ decode_mlp_frame(MLPDecoder* decoder,
             a_int_reset(substream1->parameters.matrix[m].bypassed_LSB);
 
         /*decode substream 1 bytes to channel data*/
-        pcm_frames[1] = decode_substream(substream1,
-                                         substream_reader,
-                                         decoder->framelist);
-
-        substream_reader->close(substream_reader);
+        if (!setjmp(*br_try(substream_reader))) {
+            pcm_frames[1] = decode_substream(substream1,
+                                             substream_reader,
+                                             decoder->framelist);
+            br_etry(substream_reader);
+            substream_reader->close(substream_reader);
+        } else {
+            /*I/O error decoding substream*/
+            br_etry(substream_reader);
+            substream_reader->close(substream_reader);
+            assert(0);
+            return 0;
+        }
 
         if (!pcm_frames[1]) {
             assert(0);
@@ -648,6 +660,8 @@ read_major_sync(BitstreamReader *mlp_frame, struct major_sync *major_sync)
 {
     br_pos_t* frame_start = mlp_frame->getpos(mlp_frame);
     if (!setjmp(*br_try(mlp_frame))) {
+        int valid_major_sync;
+
         mlp_frame->parse(mlp_frame,
                          "24u 8u 4u 4u 4u 4u 11p 5u 48p 1u 15u 4u 92p",
                          &(major_sync->sync_words),
@@ -662,11 +676,17 @@ read_major_sync(BitstreamReader *mlp_frame, struct major_sync *major_sync)
                          &(major_sync->substream_count));
 
         br_etry(mlp_frame);
+
+        valid_major_sync = ((major_sync->sync_words == 0xF8726F) &&
+                            (major_sync->stream_type == 0xBB) &&
+                            ((major_sync->substream_count == 1) ||
+                             (major_sync->substream_count == 2)));
+
+        if (!valid_major_sync) {
+            mlp_frame->setpos(mlp_frame, frame_start);
+        }
         frame_start->del(frame_start);
-        return ((major_sync->sync_words == 0xF8726F) &&
-                (major_sync->stream_type == 0xBB) &&
-                ((major_sync->substream_count == 1) ||
-                 (major_sync->substream_count == 2)));
+        return valid_major_sync;
     } else {
         /*some I/O error occurred reading major sync
           this is not necessarily an error*/

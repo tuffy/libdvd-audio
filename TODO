@@ -4,6 +4,8 @@
 ** DONE Add PCM decoding support
 ** TODO Add MLP decoding support
 ** TODO Add unprotection support
+** TODO Add seeking support
+   It should be possible to seek directly to the start of a track
 ** TODO Add licensing text to all files
 ** TODO Add versioning to library
    Ensure major and minor version show up somewhere

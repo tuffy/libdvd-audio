@@ -1,4 +1,4 @@
-FLAGS = -Wall -g
+FLAGS = -Wall -g -DDEBUG
 BINARIES = array bitstream huffman dvdainfo
 SRC = src
 INCLUDE = include
