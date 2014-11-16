@@ -3,14 +3,14 @@ struct DVDA_Titleset_s;
 struct DVDA_Title_s;
 struct DVDA_Track_s;
 struct DVDA_Index_s;
-struct DVDA_Title_Reader_s;
+struct DVDA_Track_Reader_s;
 
 typedef struct DVDA_s DVDA;
 typedef struct DVDA_Titleset_s DVDA_Titleset;
 typedef struct DVDA_Title_s DVDA_Title;
 typedef struct DVDA_Track_s DVDA_Track;
 typedef struct DVDA_Index_s DVDA_Index;
-typedef struct DVDA_Title_Reader_s DVDA_Title_Reader;
+typedef struct DVDA_Track_Reader_s DVDA_Track_Reader;
 
 typedef enum {DVDA_PCM, DVDA_MLP} dvda_codec_t;
 
@@ -65,45 +65,6 @@ dvda_track_count(const DVDA_Title* title);
 unsigned
 dvda_title_pts_length(const DVDA_Title* title);
 
-/*given a DVDA_Title object, returns a DVDA_Title_Reader
-  or NULL if some error occurs
-
-  the DVDA_Title_Reader should be closed with dvda_close_title_reader()
-  when no longer needed*/
-DVDA_Title_Reader*
-dvda_open_title_reader(DVDA* dvda, unsigned titleset, DVDA_Title* title);
-
-void
-dvda_close_title_reader(DVDA_Title_Reader* title_reader);
-
-dvda_codec_t
-dvda_codec(DVDA_Title_Reader* reader);
-
-unsigned
-dvda_bits_per_sample(DVDA_Title_Reader* reader);
-
-unsigned
-dvda_sample_rate(DVDA_Title_Reader* reader);
-
-unsigned
-dvda_channel_count(DVDA_Title_Reader* reader);
-
-unsigned
-dvda_channel_assignment(DVDA_Title_Reader* reader);
-
-/*given a buffer with at least channel_count * pcm_frames integers,
-  populates that buffer with as many samples as possible
-  interleaved on a per-channel basis
-  (left[0], right[0], left[1], right[1], ...)
-  in DVD-A channel order
-
-  returns the number of PCM frames actually read
-  which may be less than requested at the end of the stream*/
-unsigned
-dvda_read(DVDA_Title_Reader* reader,
-          unsigned pcm_frames,
-          int buffer[]);
-
 /*given a track number (starting from 1)
   returns a DVDA_Track* or NULL if the track is not found
 
@@ -126,11 +87,48 @@ dvda_track_pts_length(const DVDA_Track* track);
 /*returns the track's first sector
   it may not start at the very beginning of the sector*/
 unsigned
-dvda_track_first_sector(const DVDA_Title* title,
-                        const DVDA_Track* track);
+dvda_track_first_sector(const DVDA_Track* track);
 
 /*returns the track's last sector
   it may not end at the very end of the sector*/
 unsigned
-dvda_track_last_sector(const DVDA_Title* title,
-                       const DVDA_Track* track);
+dvda_track_last_sector(const DVDA_Track* track);
+
+/*given a DVDA_Track object, returns a DVDA_Track_Reader
+  or NULL if some error occurs
+
+  the DVDA_Track_Reader should be closed with dvda_close_track_reader()
+  when no longer needed*/
+DVDA_Track_Reader*
+dvda_open_track_reader(DVDA* dvda, DVDA_Track* track);
+
+void
+dvda_close_track_reader(DVDA_Track_Reader* reader);
+
+dvda_codec_t
+dvda_codec(DVDA_Track_Reader* reader);
+
+unsigned
+dvda_bits_per_sample(DVDA_Track_Reader* reader);
+
+unsigned
+dvda_sample_rate(DVDA_Track_Reader* reader);
+
+unsigned
+dvda_channel_count(DVDA_Track_Reader* reader);
+
+unsigned
+dvda_channel_assignment(DVDA_Track_Reader* reader);
+
+/*given a buffer with at least channel_count * pcm_frames integers,
+  populates that buffer with as many samples as possible
+  interleaved on a per-channel basis
+  (left[0], right[0], left[1], right[1], ...)
+  in DVD-A channel order
+
+  returns the number of PCM frames actually read
+  which may be less than requested at the end of the stream*/
+unsigned
+dvda_read(DVDA_Track_Reader* reader,
+          unsigned pcm_frames,
+          int buffer[]);

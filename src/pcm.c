@@ -25,9 +25,6 @@ static int
 SL24_char_to_int(unsigned char *s);
 
 struct PCMDecoder_s {
-    struct stream_parameters parameters;
-    BitstreamQueue* sector_data;
-    BitstreamQueue* pcm_data;
     unsigned bps;
     int (*converter)(unsigned char *);
     unsigned channels;
@@ -36,15 +33,9 @@ struct PCMDecoder_s {
 };
 
 PCMDecoder*
-dvda_open_pcmdecoder(const struct stream_parameters* parameters,
-                     unsigned bits_per_sample,
-                     unsigned channel_count)
+dvda_open_pcmdecoder(unsigned bits_per_sample, unsigned channel_count)
 {
     PCMDecoder* decoder = malloc(sizeof(PCMDecoder));
-
-    decoder->parameters = *parameters;
-    decoder->sector_data = br_open_queue(BS_BIG_ENDIAN);
-    decoder->pcm_data = br_open_queue(BS_BIG_ENDIAN);
 
     if (bits_per_sample == 16) {
         decoder->bps = 0;
@@ -66,115 +57,124 @@ dvda_open_pcmdecoder(const struct stream_parameters* parameters,
 void
 dvda_close_pcmdecoder(PCMDecoder* decoder)
 {
-    decoder->sector_data->close(decoder->sector_data);
-    decoder->pcm_data->close(decoder->pcm_data);
-
     free(decoder);
 }
 
+void
+dvda_pcmdecoder_decode_params(BitstreamReader *packet_reader,
+                              struct stream_parameters* parameters)
+{
+    unsigned first_audio_frame;
+    unsigned crc;
+
+    packet_reader->parse(
+        packet_reader,
+        "16u 8p 4u 4u 4u 4u 8p 8u 8p 8u",
+        &first_audio_frame,
+        &(parameters->group_0_bps),
+        &(parameters->group_1_bps),
+        &(parameters->group_0_rate),
+        &(parameters->group_1_rate),
+        &(parameters->channel_assignment),
+        &crc);
+}
+
+//unsigned
+//dvda_pcmdecoder_decode_packet(PCMDecoder* decoder,
+//                              BitstreamReader* packet_reader,
+//                              aa_int* samples)
+//{
+//    BitstreamQueue* sector_data = decoder->sector_data;
+//    BitstreamReader* sector_reader = (BitstreamReader*)sector_data;
+//
+//    sector_data->push(sector_data, SECTOR_SIZE, sector);
+//
+//    /*skip over the pack header*/
+//    if (!setjmp(*br_try(sector_reader))) {
+//        uint64_t pts;
+//        unsigned SCR_extension;
+//        unsigned bitrate;
+//
+//        read_pack_header(sector_reader, &pts, &SCR_extension, &bitrate);
+//        br_etry(sector_reader);
+//    } else {
+//        br_etry(sector_reader);
+//        return 0;
+//    }
+//
+//    /*walk through all the sector's packets*/
+//    while (sector_data->size(sector_data)) {
+//        unsigned stream_id = 0;
+//        unsigned packet_length = 0;
+//        BitstreamReader* packet_reader;
+//
+//        /*for each packet*/
+//        if (!setjmp(*br_try(sector_reader))) {
+//            if (read_packet_header(sector_reader, &stream_id, &packet_length)) {
+//                /*invalid start code*/
+//                br_etry(sector_reader);
+//                return 0;
+//            } else {
+//                packet_reader = sector_reader->substream(sector_reader,
+//                                                         packet_length);
+//            }
+//            br_etry(sector_reader);
+//        } else {
+//            /*I/O error reading packet header or getting substream*/
+//            br_etry(sector_reader);
+//            return 0;
+//        }
+//
+//        if (!setjmp(*br_try(packet_reader))) {
+//            /*if packet is audio*/
+//            if (stream_id == 0xBD) {
+//                unsigned pad_1_size;
+//                unsigned codec_id;
+//                unsigned pad_2_size;
+//
+//                packet_reader->parse(packet_reader, "16p 8u", &pad_1_size);
+//                packet_reader->skip_bytes(packet_reader, pad_1_size);
+//                packet_reader->parse(packet_reader, "8u 8p 8p 8u",
+//                                     &codec_id, &pad_2_size);
+//
+//                /*and if the audio packet is PCM*/
+//                if (codec_id == 0xA0) {
+//                    struct stream_parameters parameters;
+//
+//                    /*ensure its parameters match our stream*/
+//                    dvda_pcmdecoder_decode_params(packet_reader, &parameters);
+//                    if (dvda_params_equal(&(decoder->parameters),
+//                                          &parameters)) {
+//                        /*then push its data onto our PCM queue*/
+//                        packet_reader->skip_bytes(packet_reader, pad_2_size - 9);
+//                        packet_reader->enqueue(
+//                            packet_reader,
+//                            packet_length - (3 + pad_1_size + 4 + pad_2_size),
+//                            decoder->pcm_data);
+//                    }
+//                    /*skip non-matching PCM packets*/
+//                }
+//                /*skip non-PCM packets*/
+//            }
+//            /*ignore non-audio packets*/
+//
+//            br_etry(packet_reader);
+//            packet_reader->close(packet_reader);
+//        } else {
+//            /*I/O error reading packet*/
+//            br_etry(packet_reader);
+//            packet_reader->close(packet_reader);
+//        }
+//    }
+//
+//    /*then process as much PCM data from the queue as possible*/
+//    return pcmdecoder_decode(decoder, samples);
+//}
+
 unsigned
-dvda_pcmdecoder_decode_sector(PCMDecoder* decoder,
-                              const uint8_t sector[],
+dvda_pcmdecoder_decode_packet(PCMDecoder* decoder,
+                              BitstreamReader* packet_reader,
                               aa_int* samples)
-{
-    BitstreamQueue* sector_data = decoder->sector_data;
-    BitstreamReader* sector_reader = (BitstreamReader*)sector_data;
-
-    sector_data->push(sector_data, SECTOR_SIZE, sector);
-
-    /*skip over the pack header*/
-    if (!setjmp(*br_try(sector_reader))) {
-        uint64_t pts;
-        unsigned SCR_extension;
-        unsigned bitrate;
-
-        read_pack_header(sector_reader, &pts, &SCR_extension, &bitrate);
-        br_etry(sector_reader);
-    } else {
-        br_etry(sector_reader);
-        return 0;
-    }
-
-    /*walk through all the sector's packets*/
-    while (sector_data->size(sector_data)) {
-        unsigned stream_id = 0;
-        unsigned packet_length = 0;
-        BitstreamReader* packet_reader;
-
-        /*for each packet*/
-        if (!setjmp(*br_try(sector_reader))) {
-            if (read_packet_header(sector_reader, &stream_id, &packet_length)) {
-                /*invalid start code*/
-                br_etry(sector_reader);
-                return 0;
-            } else {
-                packet_reader = sector_reader->substream(sector_reader,
-                                                         packet_length);
-            }
-            br_etry(sector_reader);
-        } else {
-            /*I/O error reading packet header or getting substream*/
-            br_etry(sector_reader);
-            return 0;
-        }
-
-        if (!setjmp(*br_try(packet_reader))) {
-            /*if packet is audio*/
-            if (stream_id == 0xBD) {
-                unsigned pad_1_size;
-                unsigned codec_id;
-                unsigned pad_2_size;
-
-                packet_reader->parse(packet_reader, "16p 8u", &pad_1_size);
-                packet_reader->skip_bytes(packet_reader, pad_1_size);
-                packet_reader->parse(packet_reader, "8u 8p 8p 8u",
-                                     &codec_id, &pad_2_size);
-
-                /*and if the audio packet is PCM*/
-                if (codec_id == 0xA0) {
-                    struct stream_parameters parameters;
-
-                    /*ensure its parameters match our stream*/
-                    dvda_pcmdecoder_decode_params(packet_reader, &parameters);
-                    if (dvda_params_equal(&(decoder->parameters),
-                                          &parameters)) {
-                        /*then push its data onto our PCM queue*/
-                        packet_reader->skip_bytes(packet_reader, pad_2_size - 9);
-                        packet_reader->enqueue(
-                            packet_reader,
-                            packet_length - (3 + pad_1_size + 4 + pad_2_size),
-                            decoder->pcm_data);
-                    }
-                    /*skip non-matching PCM packets*/
-                }
-                /*skip non-PCM packets*/
-            }
-            /*ignore non-audio packets*/
-
-            br_etry(packet_reader);
-            packet_reader->close(packet_reader);
-        } else {
-            /*I/O error reading packet*/
-            br_etry(packet_reader);
-            packet_reader->close(packet_reader);
-        }
-    }
-
-    /*then process as much PCM data from the queue as possible*/
-    return pcmdecoder_decode(decoder, samples);
-}
-
-unsigned
-dvda_pcmdecoder_flush(PCMDecoder* decoder,
-                      aa_int* samples)
-{
-    const unsigned decoded = pcmdecoder_decode(decoder, samples);
-    decoder->pcm_data->reset(decoder->pcm_data);
-    return decoded;
-}
-
-static unsigned
-pcmdecoder_decode(PCMDecoder* decoder, aa_int* samples)
 {
     const static uint8_t AOB_BYTE_SWAP[2][6][36] = {
         { /*16 bps*/
@@ -212,7 +212,6 @@ pcmdecoder_decode(PCMDecoder* decoder, aa_int* samples)
                12, 15, 18, 21, 30, 33}  /*6 ch*/
         }
     };
-    BitstreamQueue* pcm_data = decoder->pcm_data;
     const unsigned bps = decoder->bps;
     int (*converter)(unsigned char *) = decoder->converter;
     const unsigned channels = decoder->channels;
@@ -220,7 +219,7 @@ pcmdecoder_decode(PCMDecoder* decoder, aa_int* samples)
     const unsigned chunk_size = decoder->chunk_size;
     unsigned processed_frames = 0;
 
-    while (pcm_data->size(pcm_data) >= chunk_size) {
+    while (packet_reader->size(packet_reader) >= chunk_size) {
         uint8_t unswapped[36];
         uint8_t* unswapped_ptr = unswapped;
         unsigned i;
@@ -228,7 +227,7 @@ pcmdecoder_decode(PCMDecoder* decoder, aa_int* samples)
         /*swap read bytes to proper order*/
         for (i = 0; i < chunk_size; i++) {
             unswapped[AOB_BYTE_SWAP[bps][channels - 1][i]] =
-                (uint8_t)(pcm_data->read((BitstreamReader*)pcm_data, 8));
+                (uint8_t)(packet_reader->read(packet_reader, 8));
         }
 
         /*decode bytes to PCM ints and place them in proper channels*/
@@ -242,25 +241,6 @@ pcmdecoder_decode(PCMDecoder* decoder, aa_int* samples)
     }
 
     return processed_frames;
-}
-
-void
-dvda_pcmdecoder_decode_params(BitstreamReader *sector_reader,
-                              struct stream_parameters* parameters)
-{
-    unsigned first_audio_frame;
-    unsigned crc;
-
-    sector_reader->parse(
-        sector_reader,
-        "16u 8p 4u 4u 4u 4u 8p 8u 8p 8u",
-        &first_audio_frame,
-        &(parameters->group_0_bps),
-        &(parameters->group_1_bps),
-        &(parameters->group_0_rate),
-        &(parameters->group_1_rate),
-        &(parameters->channel_assignment),
-        &crc);
 }
 
 static int

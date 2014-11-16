@@ -8,32 +8,21 @@ struct PCMDecoder_s;
 typedef struct PCMDecoder_s PCMDecoder;
 
 PCMDecoder*
-dvda_open_pcmdecoder(const struct stream_parameters* parameters,
-                     unsigned bits_per_sample,
-                     unsigned channel_count);
+dvda_open_pcmdecoder(unsigned bits_per_sample, unsigned channel_count);
 
 void
 dvda_close_pcmdecoder(PCMDecoder* decoder);
 
-/*given a 2048 byte sector of data,
-  decodes as many samples as possible to samples
-  and returns the number of PCM frames decoded
-
-  may return 0 at the end of stream or if a read error occurs*/
-unsigned
-dvda_pcmdecoder_decode_sector(PCMDecoder* decoder,
-                              const uint8_t sector[],
-                              aa_int* samples);
-
-/*decodes all leftover data to samples
-  and returns the number of PCM frames decoded
-
-  may return 0 at the end of stream or if a read error occurs*/
-unsigned
-dvda_pcmdecoder_flush(PCMDecoder* decoder,
-                      aa_int* samples);
-
-/*decodes the PCM stream parameters from the sector*/
+/*decodes the PCM stream parameters from the start of the packet*/
 void
-dvda_pcmdecoder_decode_params(BitstreamReader *sector_reader,
+dvda_pcmdecoder_decode_params(BitstreamReader *packet_reader,
                               struct stream_parameters* parameters);
+
+/*given a packet reader substream
+  (not including the stream parameters or second padding)
+  decodes as many samples as possible to samples
+  and returns the number of PCM frames decoded*/
+unsigned
+dvda_pcmdecoder_decode_packet(PCMDecoder* decoder,
+                              BitstreamReader* packet_reader,
+                              aa_int* samples);
