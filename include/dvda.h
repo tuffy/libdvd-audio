@@ -1,3 +1,5 @@
+#include <inttypes.h>
+
 struct DVDA_s;
 struct DVDA_Titleset_s;
 struct DVDA_Title_s;
@@ -120,11 +122,14 @@ dvda_channel_count(DVDA_Track_Reader* reader);
 unsigned
 dvda_channel_assignment(DVDA_Track_Reader* reader);
 
+uint64_t
+dvda_total_pcm_frames(DVDA_Track_Reader* reader);
+
 /*given a buffer with at least channel_count * pcm_frames integers,
   populates that buffer with as many samples as possible
   interleaved on a per-channel basis
   (left[0], right[0], left[1], right[1], ...)
-  in DVD-A channel order
+  in RIFF WAVE channel order
 
   returns the number of PCM frames actually read
   which may be less than requested at the end of the stream*/

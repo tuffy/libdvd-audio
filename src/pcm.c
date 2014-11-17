@@ -15,9 +15,6 @@ read_packet_header(BitstreamReader* sector_reader,
                    unsigned *stream_id,
                    unsigned *packet_length);
 
-static unsigned
-pcmdecoder_decode(PCMDecoder* decoder, aa_int* samples);
-
 static int
 SL16_char_to_int(unsigned char *s);
 

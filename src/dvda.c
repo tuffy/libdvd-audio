@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <inttypes.h>
+#include <math.h>
 #include "bitstream.h"
 #include "array.h"
 #include "audio_ts.h"
@@ -13,6 +13,7 @@
 
 #define SECTOR_SIZE 2048
 #define PTS_PER_SECOND 90000
+#define AUDIO_STREAM_ID 0xBD
 #define PCM_CODEC_ID 0xA0
 #define MLP_CODEC_ID 0xA1
 
@@ -63,6 +64,7 @@ struct DVDA_Track_Reader_s {
 
     dvda_codec_t codec;
     struct stream_parameters parameters;
+    uint64_t total_pcm_frames;
     uint64_t remaining_pcm_frames;
 
     union {
@@ -88,17 +90,6 @@ open_pcm_track_reader(AOB_Reader* aob_reader,
                       unsigned pts_length,
                       unsigned pad_2_size);
 
-///*returns 0 on success, 1 on failure*/
-//static int
-//dvda_probe_stream(const uint8_t* sector_data,
-//                  dvda_codec_t* codec,
-//                  struct stream_parameters* parameters);
-//
-//static int
-//dvda_probe_mlp(BitstreamReader *sector_reader,
-//               unsigned pad_2_size,
-//               struct stream_parameters* parameters);
-
 /*readers 0 on success, 1 on failure*/
 int
 read_pack_header(BitstreamReader *sector_reader,
@@ -117,6 +108,10 @@ void
 read_audio_packet_header(BitstreamReader* packet_reader,
                          unsigned *codec_id,
                          unsigned *pad_2_size);
+
+/*returns 0 on success, 1 on failure*/
+int
+decode_sector(DVDA_Track_Reader* reader, aa_int* samples);
 
 /*reads the 48 bit packet header
   if start code is 1,
@@ -587,13 +582,6 @@ dvda_open_track(DVDA_Title* title, unsigned track_num)
     }
 
     track = malloc(sizeof(DVDA_Track));
-    //track->titleset_number = title->titleset_number;
-    //track->title_number = title->title_number;
-    //track->track_number = track_num;
-
-    //track->index_number = title->tracks[track_num].index_number;
-    //track->pts_index = title->tracks[track_num].pts_index;
-    //track->pts_length = title->tracks[track_num].pts_length;
     *track = title->tracks[track_num];
     return track;
 }
@@ -680,7 +668,7 @@ dvda_open_track_reader(DVDA* dvda, DVDA_Track* track)
             sector_reader->close(sector_reader);
             aob_reader_close(aob_reader);
             return NULL;
-        } else if (stream_id == 0xBD) {
+        } else if (stream_id == AUDIO_STREAM_ID) {
             break;
         } else {
             audio_packet->close(audio_packet);
@@ -760,6 +748,51 @@ dvda_channel_assignment(DVDA_Track_Reader* reader)
     return reader->parameters.channel_assignment;
 }
 
+uint64_t
+dvda_total_pcm_frames(DVDA_Track_Reader* reader)
+{
+    return reader->total_pcm_frames;
+}
+
+unsigned
+dvda_read(DVDA_Track_Reader* reader,
+          unsigned pcm_frames,
+          int buffer[])
+{
+    const unsigned to_read = MIN(reader->remaining_pcm_frames, pcm_frames);
+    const unsigned channel_count = dvda_channel_count(reader);
+    aa_int* channel_data = reader->channel_data;
+    unsigned i;
+    unsigned c;
+
+    if (!to_read) {
+        return 0;
+    }
+
+    /*populate per-channel buffer with samples as needed*/
+    while (channel_data->_[0]->len < to_read) {
+        if (decode_sector(reader, channel_data)) {
+            break;
+        }
+    }
+
+    /*transfer contents of per-channel buffer to output buffer*/
+    for (c = 0; c < channel_count; c++) {
+        a_int* channel = channel_data->_[c];
+
+        for (i = 0; i < to_read; i++) {
+            buffer[i * channel_count + c] = channel->_[i];
+        }
+
+        /*remove output buffer contents from per-channel buffer*/
+        channel->de_head(channel, to_read, channel);
+    }
+
+    reader->remaining_pcm_frames -= to_read;
+
+    return to_read;
+}
+
 /*******************************************************************
  *                  private function implementations               *
  *******************************************************************/
@@ -810,16 +843,19 @@ open_pcm_track_reader(AOB_Reader* aob_reader,
     track_reader->aob_reader = aob_reader;
     unsigned channel_count;
     unsigned c;
+    double pts_length_d = pts_length;
 
     /*if PCM, pull stream attributes from start of packet
       and account for any samples to be discarded
       based on PTS offset*/
     track_reader->codec = DVDA_PCM;
     dvda_pcmdecoder_decode_params(audio_packet, &(track_reader->parameters));
-    track_reader->remaining_pcm_frames = pts_length;
-    track_reader->remaining_pcm_frames *=
-        unpack_sample_rate(track_reader->parameters.group_0_rate);
-    track_reader->remaining_pcm_frames /= PTS_PER_SECOND;
+
+    pts_length_d *= unpack_sample_rate(track_reader->parameters.group_0_rate);
+    pts_length_d /= PTS_PER_SECOND;
+
+    track_reader->total_pcm_frames = lround(pts_length_d);
+    track_reader->remaining_pcm_frames = track_reader->total_pcm_frames;
 
     channel_count =
         unpack_channel_count(track_reader->parameters.channel_assignment);
@@ -835,15 +871,17 @@ open_pcm_track_reader(AOB_Reader* aob_reader,
     }
 
     /*decode remaining bytes in packet to buffer*/
-    /*FIXME - ensure remaining_pcm_frames is still >= 0*/
     audio_packet->skip_bytes(audio_packet, pad_2_size - 9);
-    track_reader->remaining_pcm_frames -=
-        dvda_pcmdecoder_decode_packet(track_reader->decoder.pcm,
-                                      audio_packet,
-                                      track_reader->channel_data);
+    dvda_pcmdecoder_decode_packet(track_reader->decoder.pcm,
+                                  audio_packet,
+                                  track_reader->channel_data);
 
     /*FIXME - save leftover bytes in first packet for later?
       not sure if this ever happens*/
+    if (audio_packet->size(audio_packet)) {
+        fprintf(stderr, "%u leftover bytes\n",
+                audio_packet->size(audio_packet));
+    }
 
     return track_reader;
 }
@@ -1052,6 +1090,103 @@ read_audio_packet_header(BitstreamReader* packet_reader,
     packet_reader->parse(packet_reader, "16p 8u", &pad_1_size);
     packet_reader->skip_bytes(packet_reader, pad_1_size);
     packet_reader->parse(packet_reader, "8u 8p 8p 8u", codec_id, pad_2_size);
+}
+
+int
+decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
+{
+    uint8_t sector[SECTOR_SIZE];
+    BitstreamReader* sector_reader;
+    uint64_t pts;
+    unsigned SCR_extension;
+    unsigned bitrate;
+
+    /*read next sector from stream*/
+    if (aob_reader_read(reader->aob_reader, sector)) {
+        return 1;
+    }
+
+    sector_reader = br_open_buffer(sector, SECTOR_SIZE, BS_BIG_ENDIAN);
+
+    /*read pack header*/
+    if (read_pack_header(sector_reader, &pts, &SCR_extension, &bitrate)) {
+        sector_reader->close(sector_reader);
+        return 1;
+    }
+
+    /*for each audio packet in sector*/
+    do {
+        /*ensure codec matches our decoder's codec*/
+        unsigned stream_id;
+        BitstreamReader* packet_reader = read_packet(sector_reader, &stream_id);
+
+        if (!packet_reader) {
+            sector_reader->close(sector_reader);
+            return 1;
+        } else if (stream_id == AUDIO_STREAM_ID) {
+            unsigned codec_id;
+            unsigned pad_2_size;
+
+            if (!setjmp(*br_try(packet_reader))) {
+
+                read_audio_packet_header(packet_reader,
+                                         &codec_id,
+                                         &pad_2_size);
+
+                switch (codec_id) {
+                case PCM_CODEC_ID:
+                    {
+                        struct stream_parameters parameters;
+
+                        dvda_pcmdecoder_decode_params(packet_reader,
+                                                      &parameters);
+
+                        if (!dvda_params_equal(&reader->parameters,
+                                               &parameters)) {
+                            /*some stream parameters mismatch*/
+                            br_abort(packet_reader);
+                        }
+
+                        packet_reader->skip_bytes(packet_reader,
+                                                  pad_2_size - 9);
+
+                        dvda_pcmdecoder_decode_packet(reader->decoder.pcm,
+                                                      packet_reader,
+                                                      samples);
+
+                        /*FIXME - save leftover bytes in first packet for later?
+                          not sure if this ever happens*/
+                        if (packet_reader->size(packet_reader)) {
+                            fprintf(stderr, "%u leftover bytes\n",
+                                    packet_reader->size(packet_reader));
+                        }
+                    }
+                    break;
+                case MLP_CODEC_ID:
+                    /*FIXME*/
+                    assert(0);
+                    break;
+                default:
+                    /*unknown audio codec, so ignore packet*/
+                    break;
+                }
+
+                br_etry(packet_reader);
+            } else {
+                /*some I/O error reading from packet*/
+                br_etry(packet_reader);
+                packet_reader->close(packet_reader);
+                sector_reader->close(sector_reader);
+                return 1;
+            }
+        }
+
+        packet_reader->close(packet_reader);
+    } while (sector_reader->size(sector_reader));
+
+    sector_reader->close(sector_reader);
+
+    return 0;
 }
 
 int
