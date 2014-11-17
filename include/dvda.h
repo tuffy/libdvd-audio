@@ -96,7 +96,7 @@ dvda_track_first_sector(const DVDA_Track* track);
 unsigned
 dvda_track_last_sector(const DVDA_Track* track);
 
-/*given a DVDA_Track object, returns a DVDA_Track_Reader
+/*given a DVDA and DVDA_Track object, returns a DVDA_Track_Reader
   or NULL if some error occurs
 
   the DVDA_Track_Reader should be closed with dvda_close_track_reader()

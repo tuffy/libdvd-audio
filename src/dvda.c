@@ -69,6 +69,7 @@ struct DVDA_Track_Reader_s {
 
     union {
         PCMDecoder* pcm;
+        MLPDecoder* mlp;
     } decoder;
 
     aa_int* channel_data;
@@ -534,7 +535,7 @@ dvda_close_track_reader(DVDA_Track_Reader* reader)
         dvda_close_pcmdecoder(reader->decoder.pcm);
         break;
     case DVDA_MLP:
-        /*FIXME*/
+        dvda_close_mlpdecoder(reader->decoder.mlp);
         break;
     }
     reader->channel_data->del(reader->channel_data);
@@ -761,6 +762,9 @@ open_mlp_track_reader(AOB_Reader* aob_reader,
     channel_count =
         unpack_channel_count(track_reader->parameters.channel_assignment);
 
+    track_reader->decoder.mlp = dvda_open_mlpdecoder(
+        &(track_reader->parameters));
+
     /*setup initial channels*/
     track_reader->channel_data = aa_int_new();
     for (c = 0; c < channel_count; c++) {
@@ -768,7 +772,9 @@ open_mlp_track_reader(AOB_Reader* aob_reader,
     }
 
     /*decode remaining MLP frames in packet to buffer*/
-    /*FIXME*/
+    dvda_mlpdecoder_decode_packet(track_reader->decoder.mlp,
+                                  audio_packet,
+                                  track_reader->channel_data);
 
     return track_reader;
 }
@@ -933,8 +939,10 @@ decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
                     }
                     break;
                 case MLP_CODEC_ID:
-                    /*FIXME*/
-                    assert(0);
+                    packet_reader->skip_bytes(packet_reader, pad_2_size);
+                    dvda_mlpdecoder_decode_packet(reader->decoder.mlp,
+                                                  packet_reader,
+                                                  samples);
                     break;
                 default:
                     /*unknown audio codec, so ignore packet*/

@@ -2,10 +2,10 @@
 * TODO Finish version 1.0
 ** DONE Construct basic API
 ** DONE Add PCM decoding support
-** TODO Add MLP decoding support
-** TODO Add unprotection support
-** TODO Add seeking support
+** DONE Add MLP decoding support
+** DONE Add seeking support
    It should be possible to seek directly to the start of a track
+** TODO Add unprotection support
 ** TODO Add licensing text to all files
 ** TODO Add versioning to library
    Ensure major and minor version show up somewhere
@@ -16,6 +16,9 @@
    and can be probed with Valgrind to ensure there's no bugs.
 *** TODO dvda-debug-info
 *** TODO dvda2wav
+** TODO Verify utilities for errors
+   Run Valgrind over them to ensure there's no memory leaks
+   or other access errors.
 ** TODO Add library documentation
 *** TODO Add manpage for API
 *** TODO Add RST file for the web

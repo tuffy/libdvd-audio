@@ -13,11 +13,11 @@ dvda_open_mlpdecoder(const struct stream_parameters* parameters);
 void
 dvda_close_mlpdecoder(MLPDecoder* decoder);
 
+/*given a packet reader substream
+  (not including the header or pad 2 bytes)
+  decodes as many samples as possible to samples
+  and returns the number of PCM frames decoded*/
 unsigned
-dvda_mlpdecoder_decode_sector(MLPDecoder* decoder,
-                              const uint8_t sector[],
+dvda_mlpdecoder_decode_packet(MLPDecoder* decoder,
+                              BitstreamReader* packet_reader,
                               aa_int* samples);
-
-unsigned
-dvda_mlpdecoder_flush(MLPDecoder* decoder,
-                      aa_int* samples);

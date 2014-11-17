@@ -94,7 +94,6 @@ struct substream {
 
 struct MLPDecoder_s {
     struct stream_parameters parameters;
-    BitstreamQueue* sector_data;
     BitstreamQueue* mlp_data;
 
     struct major_sync major_sync;
@@ -110,17 +109,6 @@ struct checkdata {
     uint8_t crc;
     uint8_t final_crc;
 };
-
-extern int
-read_pack_header(BitstreamReader *sector_reader,
-                 uint64_t *pts,
-                 unsigned *SCR_extension,
-                 unsigned *bitrate);
-
-extern int
-read_packet_header(BitstreamReader* sector_reader,
-                   unsigned *stream_id,
-                   unsigned *packet_length);
 
 /*******************************************************************
  *                   private function definitions                  *
@@ -262,7 +250,6 @@ dvda_open_mlpdecoder(const struct stream_parameters* parameters)
     MLPDecoder* decoder = malloc(sizeof(MLPDecoder));
 
     decoder->parameters = *parameters;
-    decoder->sector_data = br_open_queue(BS_BIG_ENDIAN);
     decoder->mlp_data = br_open_queue(BS_BIG_ENDIAN);
 
     decoder->major_sync_read = 0;
@@ -305,7 +292,6 @@ dvda_close_mlpdecoder(MLPDecoder* decoder)
 {
     unsigned s;
 
-    decoder->sector_data->close(decoder->sector_data);
     decoder->mlp_data->close(decoder->mlp_data);
 
     decoder->framelist->del(decoder->framelist);
@@ -336,95 +322,15 @@ dvda_close_mlpdecoder(MLPDecoder* decoder)
 }
 
 unsigned
-dvda_mlpdecoder_decode_sector(MLPDecoder* decoder,
-                              const uint8_t sector[],
+dvda_mlpdecoder_decode_packet(MLPDecoder* decoder,
+                              BitstreamReader* packet_reader,
                               aa_int* samples)
 {
-    BitstreamQueue* sector_data = decoder->sector_data;
-    BitstreamReader* sector_reader = (BitstreamReader*)sector_data;
+    packet_reader->enqueue(packet_reader,
+                           packet_reader->size(packet_reader),
+                           decoder->mlp_data);
 
-    sector_data->push(sector_data, SECTOR_SIZE, sector);
-
-    /*skip over the pack header*/
-    if (!setjmp(*br_try(sector_reader))) {
-        uint64_t pts;
-        unsigned SCR_extension;
-        unsigned bitrate;
-
-        read_pack_header(sector_reader, &pts, &SCR_extension, &bitrate);
-        br_etry(sector_reader);
-    } else {
-        br_etry(sector_reader);
-        return 0;
-    }
-
-    /*walk through all the sector's packets*/
-    while (sector_data->size(sector_data)) {
-        unsigned stream_id = 0;
-        unsigned packet_length = 0;
-        BitstreamReader* packet_reader;
-
-        /*for each packet*/
-        if (!setjmp(*br_try(sector_reader))) {
-            if (read_packet_header(sector_reader, &stream_id, &packet_length)) {
-                /*invalid start code*/
-                br_etry(sector_reader);
-                return 0;
-            } else {
-                packet_reader = sector_reader->substream(sector_reader,
-                                                         packet_length);
-            }
-            br_etry(sector_reader);
-        } else {
-            /*I/O error reading packet header or getting substream*/
-            br_etry(sector_reader);
-            return 0;
-        }
-
-        if (!setjmp(*br_try(packet_reader))) {
-            /*if the packet is audio*/
-            if (stream_id == 0xBD) {
-                unsigned pad_1_size;
-                unsigned codec_id;
-                unsigned pad_2_size;
-
-                packet_reader->parse(packet_reader, "16p 8u", &pad_1_size);
-                packet_reader->skip_bytes(packet_reader, pad_1_size);
-                packet_reader->parse(packet_reader, "8u 8p 8p 8u",
-                                     &codec_id, &pad_2_size);
-
-                /*and if the audio packet is MLP*/
-                if (codec_id == 0xA1) {
-                    /*then push its data onto our MLP queue*/
-                    packet_reader->skip_bytes(packet_reader, pad_2_size);
-                    packet_reader->enqueue(
-                        packet_reader,
-                        packet_length - (3 + pad_1_size + 4 + pad_2_size),
-                        decoder->mlp_data);
-                }
-                /*skip non-MLP packets*/
-            }
-            /*ignore non-audio packets*/
-
-            br_etry(packet_reader);
-            packet_reader->close(packet_reader);
-        } else {
-            /*I/O error reading packet*/
-            br_etry(packet_reader);
-            packet_reader->close(packet_reader);
-        }
-    }
-
-    /*then process as much PCM data from the queue as possible*/
     return mlpdecoder_decode(decoder, samples);
-}
-
-unsigned
-dvda_mlpdecoder_flush(MLPDecoder* decoder,
-                      aa_int* samples)
-{
-    /*FIXME - have this do something*/
-    return 0;
 }
 
 /*******************************************************************
@@ -483,6 +389,33 @@ decode_mlp_frame(MLPDecoder* decoder,
                  BitstreamReader* mlp_frame,
                  aa_int* samples)
 {
+
+    /*WAVE_CHANEL[a][c] where a is 5 bit channel assignment field
+      and c is the MLP channel index
+      yields the RIFF WAVE channel index*/
+    const static int WAVE_CHANNEL[][6] = {
+        /* 0x00 */ {  0, -1, -1, -1, -1, -1},
+        /* 0x01 */ {  0,  1, -1, -1, -1, -1},
+        /* 0x02 */ {  0,  1,  2, -1, -1, -1},
+        /* 0x03 */ {  0,  1,  2,  3, -1, -1},
+        /* 0x04 */ {  0,  1,  2, -1, -1, -1},
+        /* 0x05 */ {  0,  1,  2,  3, -1, -1},
+        /* 0x06 */ {  0,  1,  2,  3,  4, -1},
+        /* 0x07 */ {  0,  1,  2, -1, -1, -1},
+        /* 0x08 */ {  0,  1,  2,  3, -1, -1},
+        /* 0x09 */ {  0,  1,  2,  3,  4, -1},
+        /* 0x0A */ {  0,  1,  2,  3, -1, -1},
+        /* 0x0B */ {  0,  1,  2,  3,  4, -1},
+        /* 0x0C */ {  0,  1,  2,  3,  4,  5},
+        /* 0x0D */ {  0,  1,  2,  3, -1, -1},
+        /* 0x0E */ {  0,  1,  2,  3,  4, -1},
+        /* 0x0F */ {  0,  1,  2,  3, -1, -1},
+        /* 0x10 */ {  0,  1,  2,  3,  4, -1},
+        /* 0x11 */ {  0,  1,  2,  3,  4,  5},
+        /* 0x12 */ {  0,  1,  3,  4,  2, -1},
+        /* 0x13 */ {  0,  1,  3,  4,  2, -1},
+        /* 0x14 */ {  0,  1,  4,  5,  2,  3}
+    };
     struct major_sync major_sync;
     struct substream* substream0 = &(decoder->substream[0]);
     struct substream* substream1 = &(decoder->substream[1]);
@@ -491,6 +424,8 @@ decode_mlp_frame(MLPDecoder* decoder,
     unsigned c;
     unsigned pcm_frames[2];
     BitstreamReader *substream_reader;
+
+    /*FIXME - handle channel reordering here*/
 
     /*check for major sync*/
     if (read_major_sync(mlp_frame, &major_sync)) {
@@ -572,9 +507,11 @@ decode_mlp_frame(MLPDecoder* decoder,
             }
         }
 
-        /*append rematrixed data to output*/
+        /*append rematrixed data to output in RIFF WAVE order*/
         for (c = 0; c < samples->len; c++) {
-            a_int* out_channel = samples->_[c];
+            a_int* out_channel = samples->_[
+                WAVE_CHANNEL[
+                    decoder->major_sync.parameters.channel_assignment][c]];
             out_channel->extend(out_channel, decoder->framelist->_[c]);
         }
 
@@ -640,9 +577,11 @@ decode_mlp_frame(MLPDecoder* decoder,
             }
         }
 
-        /*append rematrixed data to output*/
+        /*append rematrixed data to output in RIFF WAVE order*/
         for (c = 0; c < samples->len; c++) {
-            a_int* out_channel = samples->_[c];
+            a_int* out_channel = samples->_[
+                WAVE_CHANNEL[
+                    decoder->major_sync.parameters.channel_assignment][c]];
             out_channel->extend(out_channel, decoder->framelist->_[c]);
         }
 
