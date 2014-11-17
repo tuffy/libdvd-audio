@@ -7,6 +7,44 @@
    It should be possible to seek directly to the start of a track
 ** TODO Add unprotection support
 ** TODO Add licensing text to all files
+*** DONE array
+    - [X] src/array.h
+    - [X] src/array.c
+*** DONE bitstream
+    - [X] src/bitstream.h
+    - [X] src/huffman.h
+    - [X] src/mini-gmp.h
+    - [X] src/read_bits_table_be.h
+    - [X] src/read_bits_table_le.h
+    - [X] src/read_unary_table_be.h
+    - [X] src/read_unary_table_le.h
+    - [X] src/unread_bit_table_be.h
+    - [X] src/unread_bit_table_le.h
+
+    - [X] src/bitstream.c
+    - [X] src/func_io.c
+    - [X] src/huffman.c
+    - [X] src/mini-gmp.c
+    - [X] src/parson.c
+*** TODO core dvda
+   - [X] include/dvda.h
+   - [X] src/aob.h
+   - [X] src/audio_ts.h
+   - [X] src/mlp.h
+   - [X] src/mlp_codebook1.h
+   - [X] src/mlp_codebook2.h
+   - [X] src/mlp_codebook3.h
+   - [X] src/pcm.h
+   - [X] src/stream_parameters.h
+
+   - [X] src/aob.c
+   - [X] src/audio_ts.c
+   - [X] src/dvda.c
+   - [X] src/mlp.c
+   - [X] src/pcm.c
+
+   - [ ] utils/dvda-debug-info.c
+   - [ ] utils/dvda2wav
 ** TODO Add versioning to library
    Ensure major and minor version show up somewhere
 ** TODO Add .pc file for pkg-config

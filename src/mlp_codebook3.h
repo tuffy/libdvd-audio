@@ -1,6 +1,6 @@
 /********************************************************
- Audio Tools, a module and set of tools for manipulating audio data
- Copyright (C) 2007-2014  Brian Langenberger
+ DVD-A Library, a module for reading DVD-Audio discs
+ Copyright (C) 2014  Brian Langenberger
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
