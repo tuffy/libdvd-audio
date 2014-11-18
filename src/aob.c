@@ -25,6 +25,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "cppm/cppm.h"
 
 #define SECTOR_SIZE 2048
 
@@ -38,6 +39,9 @@ struct AOB_Reader_s {
     struct AOB AOB[10];
     unsigned total_aobs;
     unsigned current_aob;
+
+    struct cppm_decoder cppm_decoder;
+    int perform_decoding;
 };
 
 /*******************************************************************
@@ -91,6 +95,7 @@ aob_reader_open(const char *audio_ts_path,
     reader->total_aobs = 0;
     reader->current_aob = 0;
 
+    /*open all the individual .AOB files*/
     for (aob_number = 1; aob_number <= 9; aob_number++) {
         char aob_name[] = "ATS_XX_X.AOB";
         char *aob_path;
@@ -113,6 +118,23 @@ aob_reader_open(const char *audio_ts_path,
         } else {
             break;
         }
+    }
+
+    /*if device is present and "DVDAUDIO.MKB" is present,
+      try to open the CPPM decoder*/
+    if (cdrom_device) {
+        char *mkb_path = find_audio_ts_file(audio_ts_path, "DVDAUDIO.MKB");
+        if (mkb_path) {
+            reader->perform_decoding =
+                (cppm_init(&reader->cppm_decoder,
+                           cdrom_device,
+                           mkb_path) >= 0);
+            free(mkb_path);
+        } else {
+            reader->perform_decoding = 0;
+        }
+    } else {
+        reader->perform_decoding = 0;
     }
 
     return reader;
@@ -142,6 +164,10 @@ aob_reader_read(AOB_Reader *reader, uint8_t *sector_data)
         }
     } else {
         /*sector read OK*/
+        if (reader->perform_decoding) {
+            cppm_decrypt_block(&reader->cppm_decoder, sector_data, 1);
+        }
+
         return 0;
     }
 }

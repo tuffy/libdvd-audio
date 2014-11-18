@@ -5,7 +5,7 @@
 ** DONE Add MLP decoding support
 ** DONE Add seeking support
    It should be possible to seek directly to the start of a track
-** TODO Add unprotection support
+** DONE Add unprotection support
 ** TODO Add licensing text to all files
 *** DONE array
     - [X] src/array.h

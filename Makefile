@@ -4,21 +4,26 @@ SRC = src
 INCLUDE = include
 UTILS = utils
 
+BITSTREAM_OBJS = bitstream.o \
+huffman.o \
+func_io.o \
+mini-gmp.o
+
 DVDA_OBJS = dvda.o \
 aob.o \
 audio_ts.o \
 pcm.o \
 mlp.o \
-bitstream.o \
-array.o \
-huffman.o \
-func_io.o \
-mini-gmp.o
+cppm.o \
+ioctl.o \
+dvd_css.o \
+$(BITSTREAM_OBJS) \
+array.o
 
 all: $(BINARIES)
 
 clean:
-	rm -f $(BINARIES) *.o
+	rm -f $(BINARIES) *.o *.a
 
 dvdainfo: $(UTILS)/dvdainfo.c dvda.a
 	$(CC) $(FLAGS) $(UTILS)/dvdainfo.c -I $(INCLUDE) dvda.a -o $@
@@ -41,6 +46,15 @@ pcm.o: $(SRC)/pcm.h $(SRC)/pcm.c
 mlp.o: $(SRC)/mlp.h $(SRC)/mlp.c
 	$(CC) $(FLAGS) -c $(SRC)/mlp.c
 
+cppm.o: $(SRC)/cppm/cppm.h $(SRC)/cppm/cppm.c
+	$(CC) $(FLAGS) -c $(SRC)/cppm/cppm.c
+
+ioctl.o: $(SRC)/cppm/ioctl.h $(SRC)/cppm/ioctl.c
+	$(CC) $(FLAGS) -c $(SRC)/cppm/ioctl.c -DHAVE_LINUX_DVD_STRUCT -DDVD_STRUCT_IN_LINUX_CDROM_H
+
+dvd_css.o: $(SRC)/cppm/dvd_css.h $(SRC)/cppm/dvd_css.c
+	$(CC) $(FLAGS) -c $(SRC)/cppm/dvd_css.c
+
 huffman: $(SRC)/huffman.c $(SRC)/huffman.h parson.o
 	$(CC) $(FLAGS) -o huffman $(SRC)/huffman.c parson.o -DEXECUTABLE
 
@@ -59,8 +73,8 @@ func_io.o: $(SRC)/func_io.c $(SRC)/func_io.h
 mini-gmp.o: $(SRC)/mini-gmp.c $(SRC)/mini-gmp.h
 	$(CC) $(FLAGS) -c $(SRC)/mini-gmp.c
 
-bitstream.a: bitstream.o huffman.o func_io.o mini-gmp.o
-	$(AR) -r $@ bitstream.o huffman.o func_io.o mini-gmp.o
+bitstream.a: $(BITSTREAM_OBJS)
+	$(AR) -r $@ $(BITSTREAM_OBJS)
 
 bitstream: $(SRC)/bitstream.c $(SRC)/bitstream.h huffman.o func_io.o mini-gmp.o
 	$(CC) $(FLAGS) $(SRC)/bitstream.c huffman.o func_io.o mini-gmp.o -DEXECUTABLE -DDEBUG -o $@
