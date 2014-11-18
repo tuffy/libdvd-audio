@@ -14,11 +14,17 @@ aob.o \
 audio_ts.o \
 pcm.o \
 mlp.o \
-cppm.o \
-ioctl.o \
-dvd_css.o \
 $(BITSTREAM_OBJS) \
 array.o
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S), Linux)
+	DVDA_OBJS += cppm.o ioctl.o dvd_css.o
+	AOB_FLAGS = -DHAS_CPPM
+else
+	AOB_FLAGS =
+endif
+
 
 all: $(BINARIES)
 
@@ -35,7 +41,7 @@ dvda.o: $(INCLUDE)/dvda.h $(SRC)/dvda.c
 	$(CC) $(FLAGS) -c $(SRC)/dvda.c -I $(INCLUDE)
 
 aob.o: $(SRC)/aob.h $(SRC)/aob.c
-	$(CC) $(FLAGS) -c $(SRC)/aob.c
+	$(CC) $(FLAGS) -c $(SRC)/aob.c $(AOB_FLAGS)
 
 audio_ts.o: $(SRC)/audio_ts.h $(SRC)/audio_ts.c
 	$(CC) $(FLAGS) -c $(SRC)/audio_ts.c

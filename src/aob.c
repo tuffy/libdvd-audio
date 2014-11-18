@@ -40,8 +40,10 @@ struct AOB_Reader_s {
     unsigned total_aobs;
     unsigned current_aob;
 
+#ifdef HAS_CPPM
     struct cppm_decoder cppm_decoder;
     int perform_decoding;
+#endif
 };
 
 /*******************************************************************
@@ -122,6 +124,7 @@ aob_reader_open(const char *audio_ts_path,
 
     /*if device is present and "DVDAUDIO.MKB" is present,
       try to open the CPPM decoder*/
+#ifdef HAS_CPPM
     if (cdrom_device) {
         char *mkb_path = find_audio_ts_file(audio_ts_path, "DVDAUDIO.MKB");
         if (mkb_path) {
@@ -136,6 +139,7 @@ aob_reader_open(const char *audio_ts_path,
     } else {
         reader->perform_decoding = 0;
     }
+#endif
 
     return reader;
 }
@@ -164,9 +168,11 @@ aob_reader_read(AOB_Reader *reader, uint8_t *sector_data)
         }
     } else {
         /*sector read OK*/
+#ifdef HAS_CPPM
         if (reader->perform_decoding) {
             cppm_decrypt_block(&reader->cppm_decoder, sector_data, 1);
         }
+#endif
 
         return 0;
     }
