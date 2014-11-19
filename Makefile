@@ -1,5 +1,5 @@
 FLAGS = -Wall -g -DDEBUG
-BINARIES = array bitstream huffman dvdainfo
+BINARIES = dvda-debug-info dvda2wav
 SRC = src
 INCLUDE = include
 UTILS = utils
@@ -9,13 +9,18 @@ huffman.o \
 func_io.o \
 mini-gmp.o
 
-DVDA_OBJS = dvda.o \
+DVDA_OBJS = dvd-audio.o \
 aob.o \
 audio_ts.o \
 pcm.o \
 mlp.o \
 $(BITSTREAM_OBJS) \
 array.o
+
+CODEBOOKS = \
+$(SRC)/mlp_codebook1.h \
+$(SRC)/mlp_codebook2.h \
+$(SRC)/mlp_codebook3.h
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S), Linux)
@@ -29,16 +34,13 @@ endif
 all: $(BINARIES)
 
 clean:
-	rm -f $(BINARIES) *.o *.a
+	rm -f $(BINARIES) $(CODEBOOKS) huffman *.o *.a
 
-dvdainfo: $(UTILS)/dvdainfo.c dvda.a
-	$(CC) $(FLAGS) $(UTILS)/dvdainfo.c -I $(INCLUDE) dvda.a -o $@
-
-dvda.a: $(DVDA_OBJS)
+dvd-audio.a: $(DVDA_OBJS)
 	$(AR) -r $@ $(DVDA_OBJS)
 
-dvda.o: $(INCLUDE)/dvda.h $(SRC)/dvda.c
-	$(CC) $(FLAGS) -c $(SRC)/dvda.c -I $(INCLUDE)
+dvd-audio.o: $(INCLUDE)/dvd-audio.h $(SRC)/dvd-audio.c
+	$(CC) $(FLAGS) -c $(SRC)/dvd-audio.c -I $(INCLUDE)
 
 aob.o: $(SRC)/aob.h $(SRC)/aob.c
 	$(CC) $(FLAGS) -c $(SRC)/aob.c $(AOB_FLAGS)
@@ -49,8 +51,17 @@ audio_ts.o: $(SRC)/audio_ts.h $(SRC)/audio_ts.c
 pcm.o: $(SRC)/pcm.h $(SRC)/pcm.c
 	$(CC) $(FLAGS) -c $(SRC)/pcm.c
 
-mlp.o: $(SRC)/mlp.h $(SRC)/mlp.c
+mlp.o: $(SRC)/mlp.h $(SRC)/mlp.c $(CODEBOOKS)
 	$(CC) $(FLAGS) -c $(SRC)/mlp.c
+
+$(SRC)/mlp_codebook1.h: $(SRC)/mlp_codebook1.json huffman
+	./huffman -i $(SRC)/mlp_codebook1.json > $@
+
+$(SRC)/mlp_codebook2.h: $(SRC)/mlp_codebook2.json huffman
+	./huffman -i $(SRC)/mlp_codebook2.json > $@
+
+$(SRC)/mlp_codebook3.h: $(SRC)/mlp_codebook3.json huffman
+	./huffman -i $(SRC)/mlp_codebook3.json > $@
 
 cppm.o: $(SRC)/cppm/cppm.h $(SRC)/cppm/cppm.c
 	$(CC) $(FLAGS) -c $(SRC)/cppm/cppm.c
@@ -60,6 +71,12 @@ ioctl.o: $(SRC)/cppm/ioctl.h $(SRC)/cppm/ioctl.c
 
 dvd_css.o: $(SRC)/cppm/dvd_css.h $(SRC)/cppm/dvd_css.c
 	$(CC) $(FLAGS) -c $(SRC)/cppm/dvd_css.c
+
+dvda-debug-info: $(UTILS)/dvda-debug-info.c dvd-audio.a
+	$(CC) $(FLAGS) -o $@ $(UTILS)/dvda-debug-info.c dvd-audio.a -I $(INCLUDE) -lm
+
+dvda2wav: $(UTILS)/dvda2wav.c dvd-audio.a
+	$(CC) $(FLAGS) -o $@ $(UTILS)/dvda2wav.c dvd-audio.a -I $(INCLUDE) -I $(SRC) -lm
 
 huffman: $(SRC)/huffman.c $(SRC)/huffman.h parson.o
 	$(CC) $(FLAGS) -o huffman $(SRC)/huffman.c parson.o -DEXECUTABLE
@@ -83,7 +100,7 @@ bitstream.a: $(BITSTREAM_OBJS)
 	$(AR) -r $@ $(BITSTREAM_OBJS)
 
 bitstream: $(SRC)/bitstream.c $(SRC)/bitstream.h huffman.o func_io.o mini-gmp.o
-	$(CC) $(FLAGS) $(SRC)/bitstream.c huffman.o func_io.o mini-gmp.o -DEXECUTABLE -DDEBUG -o $@
+	$(CC) $(FLAGS) $(SRC)/bitstream.c huffman.o func_io.o mini-gmp.o -DEXECUTABLE -o $@
 
 array: $(SRC)/array.c $(SRC)/array.h
 	$(CC) $(FLAGS) $(SRC)/array.c -DEXECUTABLE -o $@

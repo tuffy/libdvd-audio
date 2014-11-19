@@ -6,7 +6,7 @@
 ** DONE Add seeking support
    It should be possible to seek directly to the start of a track
 ** DONE Add unprotection support
-** TODO Add licensing text to all files
+** DONE Add licensing text to all files
 *** DONE array
     - [X] src/array.h
     - [X] src/array.c
@@ -26,7 +26,7 @@
     - [X] src/huffman.c
     - [X] src/mini-gmp.c
     - [X] src/parson.c
-*** TODO core dvda
+*** DONE core dvda
    - [X] include/dvda.h
    - [X] src/aob.h
    - [X] src/audio_ts.h
@@ -43,17 +43,18 @@
    - [X] src/mlp.c
    - [X] src/pcm.c
 
-   - [ ] utils/dvda-debug-info.c
-   - [ ] utils/dvda2wav
-** TODO Add versioning to library
-   Ensure major and minor version show up somewhere
-** TODO Add .pc file for pkg-config
-   Make this consistent with other libraries like libcdio
-** TODO Add basic debugging utilities
+   - [X] utils/dvda-debug-info.c
+   - [X] utils/dvda2wav
+** DONE Add basic debugging utilities
    These are stripped-down proof-of-concepts to show off how the library works
    and can be probed with Valgrind to ensure there's no bugs.
-*** TODO dvda-debug-info
-*** TODO dvda2wav
+*** DONE dvda-debug-info
+*** DONE dvda2wav
+** TODO Add versioning to library
+   Ensure major and minor version show up somewhere
+** TODO Make both static and dynamic libraries
+** TODO Add .pc file for pkg-config
+   Make this consistent with other libraries like libcdio
 ** TODO Verify utilities for errors
    Run Valgrind over them to ensure there's no memory leaks
    or other access errors.

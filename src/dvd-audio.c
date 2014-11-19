@@ -17,7 +17,7 @@
  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 *******************************************************/
 
-#include "dvda.h"
+#include "dvd-audio.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +35,10 @@
 #define AUDIO_STREAM_ID 0xBD
 #define PCM_CODEC_ID 0xA0
 #define MLP_CODEC_ID 0xA1
+
+/*******************************************************************
+ *                       structure definitions                     *
+ *******************************************************************/
 
 struct DVDA_s {
     char *audio_ts_path;
@@ -116,7 +120,7 @@ open_mlp_track_reader(AOB_Reader* aob_reader,
                       unsigned pts_length,
                       unsigned pad_2_size);
 
-/*readers 0 on success, 1 on failure*/
+/*returns 0 on success, 1 on failure*/
 int
 read_pack_header(BitstreamReader *sector_reader,
                  uint64_t *pts,
@@ -138,23 +142,6 @@ read_audio_packet_header(BitstreamReader* packet_reader,
 /*returns 0 on success, 1 on failure*/
 int
 decode_sector(DVDA_Track_Reader* reader, aa_int* samples);
-
-/*reads the 48 bit packet header
-  if start code is 1,
-  populates stream_id and packet_length and returns 0
-  otherwise returns 1*/
-int
-read_packet_header(BitstreamReader* sector_reader,
-                   unsigned *stream_id,
-                   unsigned *packet_length);
-
-// /*decodes the next sector in the stream
-//   based on the reader's current decoder
-//   and appends samples to channel_data
-//
-//   returns the number of PCM frames actually processed*/
-// static unsigned
-// decode_sector(DVDA_Title_Reader* reader, aa_int* channel_data);
 
 /*given a 4 bit packed field,
   returns the bits-per-sample which is either 16, 20 or 24*/
@@ -193,7 +180,9 @@ dvda_open(const char *audio_ts_path, const char *device)
     }
 
     titleset_count = get_titleset_count(audio_ts_ifo);
+
     free(audio_ts_ifo);
+
     if (titleset_count == 0) {
         /*unable to open AUDIO_TS.IFO or some parse error*/
         return NULL;
@@ -287,6 +276,12 @@ dvda_close_titleset(DVDA_Titleset* titleset)
 }
 
 unsigned
+dvda_titleset_number(const DVDA_Titleset* titleset)
+{
+    return titleset->titleset_number;
+}
+
+unsigned
 dvda_title_count(const DVDA_Titleset* titleset)
 {
     return titleset->title_count;
@@ -307,7 +302,6 @@ dvda_open_title(DVDA_Titleset* titleset, unsigned title_num)
         title->titleset_number = titleset->titleset_number;
         title->title_number = title_num;
 
-        title->title_number = 0;
         title->track_count = 0;
         title->index_count = 0;
         title->pts_length = 0;
@@ -400,6 +394,12 @@ dvda_close_title(DVDA_Title* title)
 }
 
 unsigned
+dvda_title_number(const DVDA_Title* title)
+{
+    return title->title_number;
+}
+
+unsigned
 dvda_track_count(const DVDA_Title* title)
 {
     return title->track_count;
@@ -435,6 +435,12 @@ dvda_close_track(DVDA_Track* track)
 }
 
 unsigned
+dvda_track_number(const DVDA_Track* track)
+{
+    return track->track_number;
+}
+
+unsigned
 dvda_track_pts_index(const DVDA_Track* track)
 {
     return track->pts_index;
@@ -465,7 +471,7 @@ dvda_open_track_reader(DVDA* dvda, DVDA_Track* track)
     DVDA_Track_Reader* track_reader;
     uint8_t sector[SECTOR_SIZE];
     BitstreamReader* sector_reader;
-    BitstreamReader* audio_packet;
+    BitstreamReader* audio_packet = NULL;
     uint64_t current_PTS;
     unsigned SCR_extension;
     unsigned bitrate;
@@ -514,10 +520,17 @@ dvda_open_track_reader(DVDA* dvda, DVDA_Track* track)
             break;
         } else {
             audio_packet->close(audio_packet);
+            audio_packet = NULL;
         }
     } while (sector_reader->size(sector_reader));
 
     sector_reader->close(sector_reader);
+
+    if (!audio_packet) {
+        /*got to end of sector without hitting an audio packet*/
+        aob_reader_close(aob_reader);
+        return NULL;
+    }
 
     read_audio_packet_header(audio_packet, &codec_id, &pad_2_size);
 
@@ -535,9 +548,9 @@ dvda_open_track_reader(DVDA* dvda, DVDA_Track* track)
                                              pad_2_size);
         break;
     default:  /*unknown codec ID*/
-        audio_packet->close(audio_packet);
+        track_reader = NULL;
         aob_reader_close(aob_reader);
-        return NULL;
+        break;
     }
 
     audio_packet->close(audio_packet);
@@ -595,6 +608,68 @@ uint64_t
 dvda_total_pcm_frames(DVDA_Track_Reader* reader)
 {
     return reader->total_pcm_frames;
+}
+
+unsigned
+dvda_riff_wave_channel_mask(unsigned channel_assignment)
+{
+    enum { fL=0x001,
+           fR=0x002,
+           fC=0x004,
+          LFE=0x008,
+           bL=0x010,
+           bR=0x020,
+           bC=0x100};
+
+    switch (channel_assignment) {
+    case 0:  /*front center*/
+        return fC;
+    case 1:  /*front left, front right*/
+        return fL | fR;
+    case 2:  /*front left, front right, back center*/
+        return fL | fR | bC;
+    case 3:  /*front left, front right, back left, back right*/
+        return fL | fR | bL | bR;
+    case 4:  /*front left, front right, LFE*/
+        return fL | fR | LFE;
+    case 5:  /*front left, front right, LFE, back center*/
+        return fL | fR | LFE | bC;
+    case 6:  /*front left, front right, LFE, back left, back right*/
+        return fL | fR | LFE | bL | bR;
+    case 7:  /*front left, front right, front center*/
+        return fL | fR | fC;
+    case 8:  /*front left, front right, front center, back center*/
+        return fL | fR | fC | bC;
+    case 9:  /*front left, front right, front center, back left, back right*/
+        return fL | fR | fC | bL | bR;
+    case 10: /*front left, front right, front center, LFE*/
+        return fL | fR | fC | LFE;
+    case 11: /*front left, front right, front center, LFE, back center*/
+        return fL | fR | fC | LFE | bC;
+    case 12: /*front left, front right, front center,
+               LFE, back left, back right*/
+        return fL | fR | fC | LFE | bL | bR;
+    case 13: /*front left, front right, front center, back center*/
+        return fL | fR | fC | bC;
+    case 14: /*front left, front right, front center, back left, back right*/
+        return fL | fR | fC | bL | bR;
+    case 15: /*front left, front right, front center, LFE*/
+        return fL | fR | fC | LFE;
+    case 16: /*front left, front right, front center, LFE, back center*/
+        return fL | fR | fC | LFE | bC;
+    case 17: /*front left, front right, front center,
+               LFE, back left, back right*/
+        return fL | fR | fC | LFE | bL | bR;
+    case 18: /*front left, front right, back left, back right, LFE*/
+        return fL | fR | bL | bR | LFE;
+    case 19: /*front left, front right, back left, back right, front center*/
+        return fL | fR | bL | bR | fC;
+    case 20: /*front left, front right, back left, back right,
+               front center, LFE*/
+        return fL | fR | bL | bR | fC | LFE;
+    default:
+        return 0;
+    }
 }
 
 unsigned
@@ -986,22 +1061,6 @@ decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
     return 0;
 }
 
-int
-read_packet_header(BitstreamReader* sector_reader,
-                   unsigned *stream_id,
-                   unsigned *packet_length)
-{
-    unsigned start_code;
-
-    sector_reader->parse(sector_reader,
-                         "24u 8u 16u",
-                         &start_code,
-                         stream_id,
-                         packet_length);
-
-    return (start_code == 1) ? 0 : 1;
-}
-
 static unsigned
 unpack_bits_per_sample(unsigned packed_field)
 {
@@ -1042,13 +1101,13 @@ static unsigned
 unpack_channel_count(unsigned packed_field)
 {
     switch (packed_field) {
-    case 0: /*front center*/
+    case 0:  /*front center*/
         return 1;
-    case 1: /*front left, front right*/
+    case 1:  /*front left, front right*/
         return 2;
-    case 2: /*front left, front right, back center*/
-    case 4: /*front left, front right, LFE*/
-    case 7: /*front left, front right, front center*/
+    case 2:  /*front left, front right, back center*/
+    case 4:  /*front left, front right, LFE*/
+    case 7:  /*front left, front right, front center*/
         return 3;
     case 3:  /*front left, front right, back left, back right*/
     case 5:  /*front left, front right, LFE, back center*/

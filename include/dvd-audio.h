@@ -59,9 +59,12 @@ dvda_titleset_count(const DVDA *dvda);
 DVDA_Titleset*
 dvda_open_titleset(DVDA* dvda, unsigned titleset);
 
-/*closes the DVA_Titleset and deallocates any space it may have*/
 void
 dvda_close_titleset(DVDA_Titleset* titleset);
+
+/*returns the titleset's number, starting from 1*/
+unsigned
+dvda_titleset_number(const DVDA_Titleset* titleset);
 
 /*returns the number of titles in the title set*/
 unsigned
@@ -78,11 +81,17 @@ dvda_open_title(DVDA_Titleset* titleset, unsigned title);
 void
 dvda_close_title(DVDA_Title* title);
 
+/*returns the title's number, starting from 1*/
+unsigned
+dvda_title_number(const DVDA_Title* title);
+
 /*returns the number of tracks in the title*/
 unsigned
 dvda_track_count(const DVDA_Title* title);
 
-/*returns the total length of the title in PTS ticks*/
+/*returns the total length of the title in PTS ticks
+
+  there are 90000 PTS ticks per second*/
 unsigned
 dvda_title_pts_length(const DVDA_Title* title);
 
@@ -97,26 +106,36 @@ dvda_open_track(DVDA_Title* title, unsigned track);
 void
 dvda_close_track(DVDA_Track* track);
 
-/*returns the index of the track in PTS ticks*/
+/*returns the track's number, starting from 1*/
+unsigned
+dvda_track_number(const DVDA_Track* track);
+
+/*returns the index of the track in PTS ticks
+
+  there are 90000 PTS ticks per second*/
 unsigned
 dvda_track_pts_index(const DVDA_Track* track);
 
-/*returns the total length of the track in PTS ticks*/
+/*returns the total length of the track in PTS ticks
+
+  there are 90000 PTS ticks per second*/
 unsigned
 dvda_track_pts_length(const DVDA_Track* track);
 
 /*returns the track's first sector
-  it may not start at the very beginning of the sector*/
+
+  note that it may not start at the very beginning of the sector*/
 unsigned
 dvda_track_first_sector(const DVDA_Track* track);
 
 /*returns the track's last sector
-  it may not end at the very end of the sector*/
+
+  note that it may not end at the very end of the sector*/
 unsigned
 dvda_track_last_sector(const DVDA_Track* track);
 
 /*given a DVDA and DVDA_Track object, returns a DVDA_Track_Reader
-  or NULL if some error occurs
+  or NULL if some error occurs opening the track for reading
 
   the DVDA_Track_Reader should be closed with dvda_close_track_reader()
   when no longer needed*/
@@ -126,32 +145,48 @@ dvda_open_track_reader(DVDA* dvda, DVDA_Track* track);
 void
 dvda_close_track_reader(DVDA_Track_Reader* reader);
 
+/*returns the track's codec, such as PCM or MLP*/
 dvda_codec_t
 dvda_codec(DVDA_Track_Reader* reader);
 
+/*returns the track's bits-per-sample (16 or 24)*/
 unsigned
 dvda_bits_per_sample(DVDA_Track_Reader* reader);
 
+/*returns the track's sample rate in Hz*/
 unsigned
 dvda_sample_rate(DVDA_Track_Reader* reader);
 
+/*returns the track's number of channels*/
 unsigned
 dvda_channel_count(DVDA_Track_Reader* reader);
 
+/*returns the track's channel assignment*/
 unsigned
 dvda_channel_assignment(DVDA_Track_Reader* reader);
 
+/*returns the total length of the track in PCM frames*/
 uint64_t
 dvda_total_pcm_frames(DVDA_Track_Reader* reader);
 
-/*given a buffer with at least channel_count * pcm_frames integers,
-  populates that buffer with as many samples as possible
-  interleaved on a per-channel basis
-  (left[0], right[0], left[1], right[1], ...)
+/*returns a 32-bit RIFF WAVE channel mask*/
+unsigned
+dvda_riff_wave_channel_mask(unsigned channel_assignment);
+
+/*given a buffer with at least:
+
+  dvda_channel_count(reader) * pcm_frames
+
+  integers, populates that buffer with as many samples as possible
+  interleaved on a per-channel basis:
+
+  {left[0], right[0], left[1], right[1], ..., left[n], right[n]}
+
   in RIFF WAVE channel order
 
   returns the number of PCM frames actually read
-  which may be less than requested at the end of the stream*/
+  which may be less than requested at the end of the stream
+*/
 unsigned
 dvda_read(DVDA_Track_Reader* reader,
           unsigned pcm_frames,
