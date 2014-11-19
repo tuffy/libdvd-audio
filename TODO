@@ -50,7 +50,7 @@
    and can be probed with Valgrind to ensure there's no bugs.
 *** DONE dvda-debug-info
 *** DONE dvda2wav
-** TODO Add versioning to library
+** DONE Add versioning to library
    Ensure major and minor version show up somewhere
 ** TODO Make both static and dynamic libraries
 ** TODO Add .pc file for pkg-config

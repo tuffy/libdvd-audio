@@ -19,6 +19,18 @@
 
 #include <inttypes.h>
 
+#define LIBDVDAUDIO_MAJOR_VERSION 1
+#define LIBDVDAUDIO_MINOR_VERSION 0
+
+#define TO_STR(x) #x
+#define VERSION_STR(x) TO_STR(x)
+#define LIBDVDAUDIO_MKVERSION(major, minor, extra) major "." minor extra
+
+#define LIBDVDAUDIO_VERSION_STRING \
+LIBDVDAUDIO_MKVERSION(VERSION_STR(LIBDVDAUDIO_MAJOR_VERSION), \
+                      VERSION_STR(LIBDVDAUDIO_MINOR_VERSION), \
+                      " beta 1")
+
 struct DVDA_s;
 struct DVDA_Titleset_s;
 struct DVDA_Title_s;

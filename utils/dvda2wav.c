@@ -69,6 +69,7 @@ main(int argc, char *argv[])
         {"track", required_argument, 0, 't'},
         {"dir", required_argument, 0, 'd'},
         {"help", no_argument, 0, 'h'},
+        {"version", no_argument, 0, 'v'},
         {0, 0, 0, 0}
     };
 
@@ -85,6 +86,9 @@ main(int argc, char *argv[])
         switch (c) {
         case 'h':
             display_options(progname, stdout);
+            return 0;
+        case 'v':
+            printf("libDVD-Audio %s\n", LIBDVDAUDIO_VERSION_STRING);
             return 0;
         case 'A':
             audio_ts = optarg;
@@ -184,6 +188,8 @@ display_options(const char *progname, FILE *output)
     fprintf(output, "Options:\n");
     fprintf(output, "  -h, --help                "
             "show this help message and exit\n");
+    fprintf(output, "  --version                 "
+            "display version number and exit\n");
     fprintf(output, "  -A PATH, --audio_ts=PATH  "
             "path to disc's AUDIO_TS directory\n");
     fprintf(output, "  -c DEVICE, --cdrom=DEVICE "
