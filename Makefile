@@ -47,13 +47,13 @@ endif
 all: $(STATIC_LIBRARY) $(SHARED_LIBRARY) $(BINARIES) $(PKG_CONFIG_METADATA)
 
 install: $(STATIC_LIBRARY) $(SHARED_LIBRARY) $(BINARIES) $(PKG_CONFIG_METADATA)
-	install --mode=644 $(SHARED_LIBRARY) $(LIB_DIR)
+	install -m 644 $(SHARED_LIBRARY) $(LIB_DIR)
 	ln -sf $(LIB_DIR)/$(SHARED_LIBRARY) $(LIB_DIR)/libdvd-audio.so.$(MAJOR_VERSION)
 	ln -sf $(LIB_DIR)/$(SHARED_LIBRARY) $(LIB_DIR)/libdvd-audio.so
-	install --mode=644 $(STATIC_LIBRARY) $(LIB_DIR)
-	install --mode=644 include/dvd-audio.h $(INCLUDE_DIR)
-	install --mode=755 $(BINARIES) $(BIN_DIR)
-	install --mode=644 $(PKG_CONFIG_METADATA) $(PKG_CONFIG_DIR)
+	install -m 644 $(STATIC_LIBRARY) $(LIB_DIR)
+	install -m 644 include/dvd-audio.h $(INCLUDE_DIR)
+	install -m 755 $(BINARIES) $(BIN_DIR)
+	install -m 644 $(PKG_CONFIG_METADATA) $(PKG_CONFIG_DIR)
 
 clean:
 	rm -f $(BINARIES) $(CODEBOOKS) $(BINARIES) $(PKG_CONFIG_METADATA) huffman *.o *.a *.so*

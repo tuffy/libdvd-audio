@@ -31,7 +31,6 @@
 #include "stream_parameters.h"
 
 #define SECTOR_SIZE 2048
-#define PTS_PER_SECOND 90000
 #define AUDIO_STREAM_ID 0xBD
 #define PCM_CODEC_ID 0xA0
 #define MLP_CODEC_ID 0xA1

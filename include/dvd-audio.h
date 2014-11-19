@@ -34,6 +34,8 @@ LIBDVDAUDIO_MKVERSION(LIBDVDAUDIO_MAJOR_VERSION, \
                       LIBDVDAUDIO_RELEASE_VERSION, \
                       " beta 1")
 
+#define PTS_PER_SECOND 90000
+
 struct DVDA_s;
 struct DVDA_Titleset_s;
 struct DVDA_Title_s;
