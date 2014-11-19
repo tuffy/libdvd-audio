@@ -1,8 +1,7 @@
-FLAGS = -Wall -g -DDEBUG
-BINARIES = dvda-debug-info dvda2wav
-SRC = src
-INCLUDE = include
-UTILS = utils
+FLAGS = -Wall -O2 -fPIC
+LIB_DIR = /usr/local/lib
+INCLUDE_DIR = /usr/local/include
+BIN_DIR = /usr/local/bin
 
 BITSTREAM_OBJS = bitstream.o \
 huffman.o \
@@ -18,10 +17,22 @@ $(BITSTREAM_OBJS) \
 array.o
 
 CODEBOOKS = \
-$(SRC)/mlp_codebook1.h \
-$(SRC)/mlp_codebook2.h \
-$(SRC)/mlp_codebook3.h
+src/mlp_codebook1.h \
+src/mlp_codebook2.h \
+src/mlp_codebook3.h
 
+# extract version numbers from main header file
+MAJOR_VERSION = $(shell awk '$$2 == "LIBDVDAUDIO_MAJOR_VERSION" {print $$3;}' include/dvd-audio.h)
+MINOR_VERSION = $(shell awk '$$2 == "LIBDVDAUDIO_MINOR_VERSION" {print $$3;}' include/dvd-audio.h)
+RELEASE_VERSION = $(shell awk '$$2 == "LIBDVDAUDIO_RELEASE_VERSION" {print $$3;}' include/dvd-audio.h)
+
+STATIC_LIBRARY = libdvd-audio.a
+
+SHARED_LIBRARY = libdvd-audio.so.$(MAJOR_VERSION).$(MINOR_VERSION).$(RELEASE_VERSION)
+
+BINARIES = dvda-debug-info dvda2wav
+
+# extract system name from uname
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S), Linux)
 	DVDA_OBJS += cppm.o ioctl.o dvd_css.o
@@ -30,80 +41,90 @@ else
 	AOB_FLAGS =
 endif
 
+all: $(STATIC_LIBRARY) $(SHARED_LIBRARY) $(BINARIES)
 
-all: $(BINARIES)
+install: $(STATIC_LIBRARY) $(SHARED_LIBRARY) $(BINARIES)
+	install --mode=644 $(SHARED_LIBRARY) $(LIB_DIR)
+	ln -sf $(LIB_DIR)/$(SHARED_LIBRARY) $(LIB_DIR)/libdvd-audio.so.$(MAJOR_VERSION)
+	ln -sf $(LIB_DIR)/$(SHARED_LIBRARY) $(LIB_DIR)/libdvd-audio.so
+	install --mode=644 $(STATIC_LIBRARY) $(LIB_DIR)
+	install --mode=644 include/dvd-audio.h $(INCLUDE_DIR)
+	install --mode=755 $(BINARIES) $(BIN_DIR)
 
 clean:
-	rm -f $(BINARIES) $(CODEBOOKS) huffman *.o *.a
+	rm -f $(BINARIES) $(CODEBOOKS) huffman *.o *.a *.so*
 
-dvd-audio.a: $(DVDA_OBJS)
+libdvd-audio.a: $(DVDA_OBJS)
 	$(AR) -r $@ $(DVDA_OBJS)
 
-dvd-audio.o: $(INCLUDE)/dvd-audio.h $(SRC)/dvd-audio.c
-	$(CC) $(FLAGS) -c $(SRC)/dvd-audio.c -I $(INCLUDE)
+$(SHARED_LIBRARY): $(DVDA_OBJS)
+	$(CC) $(FLAGS) -Wl,-soname,libdvd-audio.so.$(MAJOR_VERSION) -shared -o $@ $(DVDA_OBJS)
 
-aob.o: $(SRC)/aob.h $(SRC)/aob.c
-	$(CC) $(FLAGS) -c $(SRC)/aob.c $(AOB_FLAGS)
+dvd-audio.o: include/dvd-audio.h src/dvd-audio.c
+	$(CC) $(FLAGS) -c src/dvd-audio.c -I include
 
-audio_ts.o: $(SRC)/audio_ts.h $(SRC)/audio_ts.c
-	$(CC) $(FLAGS) -c $(SRC)/audio_ts.c
+aob.o: src/aob.h src/aob.c
+	$(CC) $(FLAGS) -c src/aob.c $(AOB_FLAGS)
 
-pcm.o: $(SRC)/pcm.h $(SRC)/pcm.c
-	$(CC) $(FLAGS) -c $(SRC)/pcm.c
+audio_ts.o: src/audio_ts.h src/audio_ts.c
+	$(CC) $(FLAGS) -c src/audio_ts.c
 
-mlp.o: $(SRC)/mlp.h $(SRC)/mlp.c $(CODEBOOKS)
-	$(CC) $(FLAGS) -c $(SRC)/mlp.c
+pcm.o: src/pcm.h src/pcm.c
+	$(CC) $(FLAGS) -c src/pcm.c
 
-$(SRC)/mlp_codebook1.h: $(SRC)/mlp_codebook1.json huffman
-	./huffman -i $(SRC)/mlp_codebook1.json > $@
+mlp.o: src/mlp.h src/mlp.c $(CODEBOOKS)
+	$(CC) $(FLAGS) -c src/mlp.c
 
-$(SRC)/mlp_codebook2.h: $(SRC)/mlp_codebook2.json huffman
-	./huffman -i $(SRC)/mlp_codebook2.json > $@
+src/mlp_codebook1.h: src/mlp_codebook1.json huffman
+	./huffman -i src/mlp_codebook1.json > $@
 
-$(SRC)/mlp_codebook3.h: $(SRC)/mlp_codebook3.json huffman
-	./huffman -i $(SRC)/mlp_codebook3.json > $@
+src/mlp_codebook2.h: src/mlp_codebook2.json huffman
+	./huffman -i src/mlp_codebook2.json > $@
 
-cppm.o: $(SRC)/cppm/cppm.h $(SRC)/cppm/cppm.c
-	$(CC) $(FLAGS) -c $(SRC)/cppm/cppm.c
+src/mlp_codebook3.h: src/mlp_codebook3.json huffman
+	./huffman -i src/mlp_codebook3.json > $@
 
-ioctl.o: $(SRC)/cppm/ioctl.h $(SRC)/cppm/ioctl.c
-	$(CC) $(FLAGS) -c $(SRC)/cppm/ioctl.c -DHAVE_LINUX_DVD_STRUCT -DDVD_STRUCT_IN_LINUX_CDROM_H
+cppm.o: src/cppm/cppm.h src/cppm/cppm.c
+	$(CC) $(FLAGS) -c src/cppm/cppm.c
 
-dvd_css.o: $(SRC)/cppm/dvd_css.h $(SRC)/cppm/dvd_css.c
-	$(CC) $(FLAGS) -c $(SRC)/cppm/dvd_css.c
+ioctl.o: src/cppm/ioctl.h src/cppm/ioctl.c
+	$(CC) $(FLAGS) -c src/cppm/ioctl.c -DHAVE_LINUX_DVD_STRUCT -DDVD_STRUCT_IN_LINUX_CDROM_H
 
-dvda-debug-info: $(UTILS)/dvda-debug-info.c dvd-audio.a
-	$(CC) $(FLAGS) -o $@ $(UTILS)/dvda-debug-info.c dvd-audio.a -I $(INCLUDE) -lm
+dvd_css.o: src/cppm/dvd_css.h src/cppm/dvd_css.c
+	$(CC) $(FLAGS) -c src/cppm/dvd_css.c
 
-dvda2wav: $(UTILS)/dvda2wav.c dvd-audio.a
-	$(CC) $(FLAGS) -o $@ $(UTILS)/dvda2wav.c dvd-audio.a -I $(INCLUDE) -I $(SRC) -lm
+dvda-debug-info: utils/dvda-debug-info.c libdvd-audio.a
+	$(CC) $(FLAGS) -o $@ utils/dvda-debug-info.c libdvd-audio.a -I include -lm
 
-huffman: $(SRC)/huffman.c $(SRC)/huffman.h parson.o
-	$(CC) $(FLAGS) -o huffman $(SRC)/huffman.c parson.o -DEXECUTABLE
+dvda2wav: utils/dvda2wav.c libdvd-audio.a
+	$(CC) $(FLAGS) -o $@ utils/dvda2wav.c libdvd-audio.a -I include -I src -lm
 
-bitstream.o: $(SRC)/bitstream.c $(SRC)/bitstream.h
-	$(CC) $(FLAGS) -c $(SRC)/bitstream.c
+huffman: src/huffman.c src/huffman.h parson.o
+	$(CC) $(FLAGS) -o huffman src/huffman.c parson.o -DEXECUTABLE
 
-array.o: $(SRC)/array.h $(SRC)/array.c
-	$(CC) $(FLAGS) -c $(SRC)/array.c
+bitstream.o: src/bitstream.c src/bitstream.h
+	$(CC) $(FLAGS) -c src/bitstream.c
 
-huffman.o: $(SRC)/huffman.c $(SRC)/huffman.h
-	$(CC) $(FLAGS) -c $(SRC)/huffman.c -DSTANDALONE
+array.o: src/array.h src/array.c
+	$(CC) $(FLAGS) -c src/array.c
 
-func_io.o: $(SRC)/func_io.c $(SRC)/func_io.h
-	$(CC) $(FLAGS) -c $(SRC)/func_io.c
+huffman.o: src/huffman.c src/huffman.h
+	$(CC) $(FLAGS) -c src/huffman.c -DSTANDALONE
 
-mini-gmp.o: $(SRC)/mini-gmp.c $(SRC)/mini-gmp.h
-	$(CC) $(FLAGS) -c $(SRC)/mini-gmp.c
+func_io.o: src/func_io.c src/func_io.h
+	$(CC) $(FLAGS) -c src/func_io.c
+
+mini-gmp.o: src/mini-gmp.c src/mini-gmp.h
+	$(CC) $(FLAGS) -c src/mini-gmp.c
 
 bitstream.a: $(BITSTREAM_OBJS)
 	$(AR) -r $@ $(BITSTREAM_OBJS)
 
-bitstream: $(SRC)/bitstream.c $(SRC)/bitstream.h huffman.o func_io.o mini-gmp.o
-	$(CC) $(FLAGS) $(SRC)/bitstream.c huffman.o func_io.o mini-gmp.o -DEXECUTABLE -o $@
+bitstream: src/bitstream.c src/bitstream.h huffman.o func_io.o mini-gmp.o
+	$(CC) $(FLAGS) src/bitstream.c huffman.o func_io.o mini-gmp.o -DEXECUTABLE -o $@
 
-array: $(SRC)/array.c $(SRC)/array.h
-	$(CC) $(FLAGS) $(SRC)/array.c -DEXECUTABLE -o $@
+array: src/array.c src/array.h
+	$(CC) $(FLAGS) src/array.c -DEXECUTABLE -o $@
 
-parson.o: $(SRC)/parson.c $(SRC)/parson.h
-	$(CC) $(FLAGS) -c $(SRC)/parson.c
+parson.o: src/parson.c src/parson.h
+	$(CC) $(FLAGS) -c src/parson.c

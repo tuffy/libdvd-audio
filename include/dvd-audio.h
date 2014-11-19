@@ -21,14 +21,17 @@
 
 #define LIBDVDAUDIO_MAJOR_VERSION 1
 #define LIBDVDAUDIO_MINOR_VERSION 0
+#define LIBDVDAUDIO_RELEASE_VERSION 0
 
 #define TO_STR(x) #x
 #define VERSION_STR(x) TO_STR(x)
-#define LIBDVDAUDIO_MKVERSION(major, minor, extra) major "." minor extra
+#define LIBDVDAUDIO_MKVERSION(major, minor, release, extra) \
+VERSION_STR(major) "." VERSION_STR(minor) "." VERSION_STR(release) extra
 
 #define LIBDVDAUDIO_VERSION_STRING \
-LIBDVDAUDIO_MKVERSION(VERSION_STR(LIBDVDAUDIO_MAJOR_VERSION), \
-                      VERSION_STR(LIBDVDAUDIO_MINOR_VERSION), \
+LIBDVDAUDIO_MKVERSION(LIBDVDAUDIO_MAJOR_VERSION, \
+                      LIBDVDAUDIO_MINOR_VERSION, \
+                      LIBDVDAUDIO_RELEASE_VERSION, \
                       " beta 1")
 
 struct DVDA_s;

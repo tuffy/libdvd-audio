@@ -52,7 +52,7 @@
 *** DONE dvda2wav
 ** DONE Add versioning to library
    Ensure major and minor version show up somewhere
-** TODO Make both static and dynamic libraries
+** DONE Make both static and dynamic libraries
 ** TODO Add .pc file for pkg-config
    Make this consistent with other libraries like libcdio
 ** TODO Verify utilities for errors
