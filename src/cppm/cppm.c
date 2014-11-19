@@ -238,6 +238,19 @@ cppm_init(struct cppm_decoder *p_ctx,
     return p_ctx->media_type;
 }
 
+static inline uint64_t
+read_uint64(const uint8_t *buffer)
+{
+    uint64_t value = 0;
+    unsigned i;
+    for (i = 8; i; i--) {
+        value <<= 8;
+        value |= buffer[0];
+        buffer++;
+    }
+    return value;
+}
+
 int
 cppm_set_id_album(struct cppm_decoder *p_ctx,
                   int i_fd) {
@@ -257,8 +270,9 @@ cppm_set_id_album(struct cppm_decoder *p_ctx,
     }
     for (i = 0; i < DVD_DISCKEY_SIZE; i++)
         p_buffer[i] ^= css.p_bus_key[4 - (i % KEY_SIZE)];
-    p_ctx->id_album_media = *(uint64_t*)&p_buffer[80];
-    B2N_64(p_ctx->id_album_media);
+    /*p_ctx->id_album_media = *(uint64_t*)&p_buffer[80];*/
+    /*B2N_64(p_ctx->id_album_media);*/
+    p_ctx->id_album_media = read_uint64(&p_buffer[80]);
     return 0;
 }
 
