@@ -2,6 +2,7 @@ FLAGS = -Wall -O2 -fPIC
 LIB_DIR = /usr/local/lib
 INCLUDE_DIR = /usr/local/include
 BIN_DIR = /usr/local/bin
+PKG_CONFIG_DIR = /usr/lib/pkgconfig
 
 BITSTREAM_OBJS = bitstream.o \
 huffman.o \
@@ -32,6 +33,8 @@ SHARED_LIBRARY = libdvd-audio.so.$(MAJOR_VERSION).$(MINOR_VERSION).$(RELEASE_VER
 
 BINARIES = dvda-debug-info dvda2wav
 
+PKG_CONFIG_METADATA = libdvd-audio.pc
+
 # extract system name from uname
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S), Linux)
@@ -41,18 +44,19 @@ else
 	AOB_FLAGS =
 endif
 
-all: $(STATIC_LIBRARY) $(SHARED_LIBRARY) $(BINARIES)
+all: $(STATIC_LIBRARY) $(SHARED_LIBRARY) $(BINARIES) $(PKG_CONFIG_METADATA)
 
-install: $(STATIC_LIBRARY) $(SHARED_LIBRARY) $(BINARIES)
+install: $(STATIC_LIBRARY) $(SHARED_LIBRARY) $(BINARIES) $(PKG_CONFIG_METADATA)
 	install --mode=644 $(SHARED_LIBRARY) $(LIB_DIR)
 	ln -sf $(LIB_DIR)/$(SHARED_LIBRARY) $(LIB_DIR)/libdvd-audio.so.$(MAJOR_VERSION)
 	ln -sf $(LIB_DIR)/$(SHARED_LIBRARY) $(LIB_DIR)/libdvd-audio.so
 	install --mode=644 $(STATIC_LIBRARY) $(LIB_DIR)
 	install --mode=644 include/dvd-audio.h $(INCLUDE_DIR)
 	install --mode=755 $(BINARIES) $(BIN_DIR)
+	install --mode=644 $(PKG_CONFIG_METADATA) $(PKG_CONFIG_DIR)
 
 clean:
-	rm -f $(BINARIES) $(CODEBOOKS) huffman *.o *.a *.so*
+	rm -f $(BINARIES) $(CODEBOOKS) $(BINARIES) $(PKG_CONFIG_METADATA) huffman *.o *.a *.so*
 
 libdvd-audio.a: $(DVDA_OBJS)
 	$(AR) -r $@ $(DVDA_OBJS)
@@ -98,6 +102,9 @@ dvda-debug-info: utils/dvda-debug-info.c libdvd-audio.a
 
 dvda2wav: utils/dvda2wav.c libdvd-audio.a
 	$(CC) $(FLAGS) -o $@ utils/dvda2wav.c libdvd-audio.a -I include -I src -lm
+
+$(PKG_CONFIG_METADATA): libdvd-audio.pc.m4
+	m4 -DLIB_DIR=$(LIB_DIR) -DINCLUDE_DIR=$(INCLUDE_DIR) -DMAJOR_VERSION=$(MAJOR_VERSION) -DMINOR_VERSION=$(MINOR_VERSION) -DRELEASE_VERSION=$(RELEASE_VERSION) $< > $@
 
 huffman: src/huffman.c src/huffman.h parson.o
 	$(CC) $(FLAGS) -o huffman src/huffman.c parson.o -DEXECUTABLE

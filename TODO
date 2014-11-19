@@ -53,7 +53,7 @@
 ** DONE Add versioning to library
    Ensure major and minor version show up somewhere
 ** DONE Make both static and dynamic libraries
-** TODO Add .pc file for pkg-config
+** DONE Add .pc file for pkg-config
    Make this consistent with other libraries like libcdio
 ** TODO Verify utilities for errors
    Run Valgrind over them to ensure there's no memory leaks
