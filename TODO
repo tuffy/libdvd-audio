@@ -59,7 +59,6 @@
    Run Valgrind over them to ensure there's no memory leaks
    or other access errors.
 ** TODO Add library documentation
-*** TODO Add manpage for API
 *** TODO Add RST file for the web
 ** TODO Add format documentation
    Overhaul the documentation on how to read and decode DVD-A discs
