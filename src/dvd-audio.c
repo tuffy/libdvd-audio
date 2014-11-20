@@ -636,19 +636,7 @@ dvda_channel_count(DVDA_Track_Reader* reader)
 }
 
 unsigned
-dvda_channel_assignment(DVDA_Track_Reader* reader)
-{
-    return reader->parameters.channel_assignment;
-}
-
-uint64_t
-dvda_total_pcm_frames(DVDA_Track_Reader* reader)
-{
-    return reader->total_pcm_frames;
-}
-
-unsigned
-dvda_riff_wave_channel_mask(unsigned channel_assignment)
+dvda_riff_wave_channel_mask(DVDA_Track_Reader *reader)
 {
     enum { fL=0x001,
            fR=0x002,
@@ -658,7 +646,7 @@ dvda_riff_wave_channel_mask(unsigned channel_assignment)
            bR=0x020,
            bC=0x100};
 
-    switch (channel_assignment) {
+    switch (reader->parameters.channel_assignment) {
     case 0:  /*front center*/
         return fC;
     case 1:  /*front left, front right*/
@@ -707,6 +695,12 @@ dvda_riff_wave_channel_mask(unsigned channel_assignment)
     default:
         return 0;
     }
+}
+
+uint64_t
+dvda_total_pcm_frames(DVDA_Track_Reader* reader)
+{
+    return reader->total_pcm_frames;
 }
 
 unsigned

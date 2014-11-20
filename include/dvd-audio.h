@@ -178,17 +178,13 @@ dvda_sample_rate(DVDA_Track_Reader* reader);
 unsigned
 dvda_channel_count(DVDA_Track_Reader* reader);
 
-/*returns the track's channel assignment*/
+/*returns a 32-bit RIFF WAVE channel mask*/
 unsigned
-dvda_channel_assignment(DVDA_Track_Reader* reader);
+dvda_riff_wave_channel_mask(DVDA_Track_Reader *reader);
 
 /*returns the total length of the track in PCM frames*/
 uint64_t
 dvda_total_pcm_frames(DVDA_Track_Reader* reader);
-
-/*returns a 32-bit RIFF WAVE channel mask*/
-unsigned
-dvda_riff_wave_channel_mask(unsigned channel_assignment);
 
 /*given a buffer with at least:
 

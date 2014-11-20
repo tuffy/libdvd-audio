@@ -303,7 +303,7 @@ extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path)
         output,
         dvda_sample_rate(track_reader),
         channel_count,
-        dvda_riff_wave_channel_mask(dvda_channel_assignment(track_reader)),
+        dvda_riff_wave_channel_mask(track_reader),
         bits_per_sample,
         dvda_total_pcm_frames(track_reader));
 
