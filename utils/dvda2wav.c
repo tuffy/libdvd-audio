@@ -208,13 +208,31 @@ display_options(const char *progname, FILE *output)
             "if omitted, the current working directory is used\n");
 }
 
+static inline int
+ends_with(const char *path, char item)
+{
+    const size_t len = strlen(path);
+    if (len) {
+        return path[len - 1] == item;
+    } else {
+        return 0;
+    }
+}
+
 char*
 join_paths(const char *path1, const char *path2)
 {
-    const size_t total_size = strlen(path1) + strlen("/") + strlen(path2) + 1;
-    char *joined = malloc(total_size);
-    snprintf(joined, total_size, "%s/%s", path1, path2);
-    return joined;
+    if (ends_with(path1, '/')) {
+        const size_t total_size = strlen(path1) + strlen(path2) + 1;
+        char *joined = malloc(total_size);
+        snprintf(joined, total_size, "%s%s", path1, path2);
+        return joined;
+    } else {
+        const size_t total_size = strlen(path1) + 1 + strlen(path2) + 1;
+        char *joined = malloc(total_size);
+        snprintf(joined, total_size, "%s/%s", path1, path2);
+        return joined;
+    }
 }
 
 void
@@ -241,7 +259,7 @@ extract_track(DVDA* dvda, DVDA_Title* title,
         return;
     }
 
-    if ((track_reader = dvda_open_track_reader(dvda, track)) == NULL) {
+    if ((track_reader = dvda_open_track_reader(track)) == NULL) {
         fprintf(stderr, "*** Error: unable to open track %u for reading\n",
                 track_num);
         dvda_close_track(track);
@@ -273,7 +291,7 @@ extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path)
     unsigned frames_read;
 
     if ((output_file = fopen(output_path, "wb")) == NULL) {
-        fprintf(stderr, "*** Error: unable to open \"%s\" for writing",
+        fprintf(stderr, "*** Error: unable to open \"%s\" for writing\n",
                 output_path);
         return;
     }

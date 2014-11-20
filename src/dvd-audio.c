@@ -39,13 +39,20 @@
  *                       structure definitions                     *
  *******************************************************************/
 
-struct DVDA_s {
-    char *audio_ts_path;
+struct disc_path {
+    char *audio_ts;
     char *device;
+};
+
+struct DVDA_s {
+    struct disc_path disc;
+
     unsigned titleset_count;
 };
 
 struct DVDA_Titleset_s {
+    struct disc_path disc;
+
     unsigned titleset_number;
 
     char *ats_xx_ifo_path;
@@ -57,28 +64,34 @@ struct DVDA_Index_s {
     unsigned last_sector;
 };
 
-struct DVDA_Track_s {
-    unsigned titleset_number;
-    unsigned title_number;
-    unsigned track_number;
-
-    unsigned index_number;
-    unsigned pts_index;
-    unsigned pts_length;
-
-    DVDA_Index index;
-};
-
-
 struct DVDA_Title_s {
+    struct disc_path disc;
+
     unsigned titleset_number;
     unsigned title_number;
 
     unsigned track_count;
     unsigned index_count;
     unsigned pts_length;
-    DVDA_Track tracks[256];
+    struct {
+        unsigned index_number;
+        unsigned pts_index;
+        unsigned pts_length;
+    } tracks[256];
     DVDA_Index indexes[256];
+};
+
+struct DVDA_Track_s {
+    struct disc_path disc;
+
+    unsigned titleset_number;
+    unsigned title_number;
+    unsigned track_number;
+
+    unsigned pts_index;
+    unsigned pts_length;
+
+    DVDA_Index index;
 };
 
 struct DVDA_Track_Reader_s {
@@ -100,6 +113,21 @@ struct DVDA_Track_Reader_s {
 /*******************************************************************
  *                   private function definitions                  *
  *******************************************************************/
+
+/*initializes a disc_path structure with the given paths*/
+void
+disc_path_init(struct disc_path *path,
+               const char *audio_ts_path,
+               const char *device);
+
+/*clones the values of the source disc_path to target*/
+void
+disc_path_copy(const struct disc_path *source,
+               struct disc_path *target);
+
+/*frees the values in the given disc_path*/
+void
+disc_path_free(struct disc_path *path);
 
 /*given a full path to the AUDIO_TS.IFO file
   returns the disc's title set count
@@ -188,8 +216,7 @@ dvda_open(const char *audio_ts_path, const char *device)
     }
 
     dvda = malloc(sizeof(DVDA));
-    dvda->audio_ts_path = strdup(audio_ts_path);
-    dvda->device = device ? strdup(device) : NULL;
+    disc_path_init(&dvda->disc, audio_ts_path, device);
     dvda->titleset_count = titleset_count;
     return dvda;
 }
@@ -197,8 +224,7 @@ dvda_open(const char *audio_ts_path, const char *device)
 void
 dvda_close(DVDA *dvda)
 {
-    free(dvda->audio_ts_path);
-    free(dvda->device);
+    disc_path_free(&dvda->disc);
     free(dvda);
 }
 
@@ -219,23 +245,26 @@ dvda_open_titleset(DVDA* dvda, unsigned titleset_num)
 
     snprintf(ats_xx_ifo_name, 13, "ATS_%2.2d_0.IFO", MIN(titleset_num, 99));
 
-    if ((ats_xx_ifo_path = find_audio_ts_file(dvda->audio_ts_path,
+    if ((ats_xx_ifo_path = find_audio_ts_file(dvda->disc.audio_ts,
                                               ats_xx_ifo_name)) == NULL) {
         /*unable to find requested .IFO file*/
         return NULL;
     }
 
-    ats_xx_ifo = fopen(ats_xx_ifo_path, "rb");
-    if (ats_xx_ifo) {
-        titleset = malloc(sizeof(DVDA_Titleset));
-        titleset->titleset_number = titleset_num;
-
-        titleset->ats_xx_ifo_path = ats_xx_ifo_path;
-        titleset->title_count = 0;
-    } else {
+    if ((ats_xx_ifo = fopen(ats_xx_ifo_path, "rb")) == NULL) {
         free(ats_xx_ifo_path);
         return NULL;
     }
+
+    titleset = malloc(sizeof(DVDA_Titleset));
+
+    disc_path_copy(&dvda->disc, &titleset->disc);
+
+    titleset->titleset_number = titleset_num;
+
+    titleset->ats_xx_ifo_path = ats_xx_ifo_path;
+    titleset->title_count = 0;  /*placeholder*/
+
     bs = br_open(ats_xx_ifo, BS_BIG_ENDIAN);
     if (!setjmp(*br_try(bs))) {
         uint8_t identifier[12];
@@ -270,7 +299,10 @@ dvda_open_titleset(DVDA* dvda, unsigned titleset_num)
 void
 dvda_close_titleset(DVDA_Titleset* titleset)
 {
+    disc_path_free(&titleset->disc);
+
     free(titleset->ats_xx_ifo_path);
+
     free(titleset);
 }
 
@@ -295,18 +327,21 @@ dvda_open_title(DVDA_Titleset* titleset, unsigned title_num)
     unsigned i;
     DVDA_Title* title;
 
-    if (ats_xx_ifo) {
-        bs = br_open(ats_xx_ifo, BS_BIG_ENDIAN);
-        title = malloc(sizeof(DVDA_Title));
-        title->titleset_number = titleset->titleset_number;
-        title->title_number = title_num;
-
-        title->track_count = 0;
-        title->index_count = 0;
-        title->pts_length = 0;
-    } else {
+    if (!ats_xx_ifo) {
         return NULL;
     }
+
+    bs = br_open(ats_xx_ifo, BS_BIG_ENDIAN);
+    title = malloc(sizeof(DVDA_Title));
+
+    disc_path_copy(&titleset->disc, &title->disc);
+
+    title->titleset_number = titleset->titleset_number;
+    title->title_number = title_num;
+
+    title->track_count = 0; /*placeholder*/
+    title->index_count = 0; /*placeholder*/
+    title->pts_length = 0; /*placeholder*/
 
     if (!setjmp(*br_try(bs))) {
         bs->seek(bs, SECTOR_SIZE, BS_SEEK_SET);
@@ -330,11 +365,6 @@ dvda_open_title(DVDA_Titleset* titleset, unsigned title_num)
 
                 /*populate tracks*/
                 for (i = 0; i < title->track_count; i++) {
-                    title->tracks[i].titleset_number =
-                        titleset->titleset_number;
-                    title->tracks[i].title_number = title_num;
-                    title->tracks[i].track_number = i + 1;
-
                     bs->parse(bs, "32p 8u 8p 32u 32u 48p",
                               &(title->tracks[i].index_number),
                               &(title->tracks[i].pts_index),
@@ -357,12 +387,6 @@ dvda_open_title(DVDA_Titleset* titleset, unsigned title_num)
                         /*invalid index ID*/
                         br_abort(bs);
                     }
-                }
-
-                /*populate track indexes*/
-                for (i = 0; i < title->track_count; i++) {
-                    title->tracks[i].index =
-                        title->indexes[title->tracks[i].index_number - 1];
                 }
 
                 br_etry(bs);
@@ -389,6 +413,8 @@ dvda_open_title(DVDA_Titleset* titleset, unsigned title_num)
 void
 dvda_close_title(DVDA_Title* title)
 {
+    disc_path_free(&title->disc);
+
     free(title);
 }
 
@@ -417,19 +443,31 @@ dvda_open_track(DVDA_Title* title, unsigned track_num)
 
     if ((track_num == 0) || (track_num > title->track_count)) {
         return NULL;
-    } else {
-        /*change 1-based index to 0-based index*/
-        track_num--;
     }
 
     track = malloc(sizeof(DVDA_Track));
-    *track = title->tracks[track_num];
+
+    disc_path_copy(&title->disc, &track->disc);
+
+    track->titleset_number = title->titleset_number;
+    track->title_number = title->title_number;
+    track->track_number = track_num;
+
+    track->pts_index =
+        title->tracks[track_num - 1].pts_index;
+    track->pts_length =
+        title->tracks[track_num - 1].pts_length;
+    track->index =
+        title->indexes[title->tracks[track_num - 1].index_number - 1];
+
     return track;
 }
 
 void
 dvda_close_track(DVDA_Track* track)
 {
+    disc_path_free(&track->disc);
+
     free(track);
 }
 
@@ -464,7 +502,7 @@ dvda_track_last_sector(const DVDA_Track* track)
 }
 
 DVDA_Track_Reader*
-dvda_open_track_reader(DVDA* dvda, DVDA_Track* track)
+dvda_open_track_reader(const DVDA_Track* track)
 {
     AOB_Reader* aob_reader;
     DVDA_Track_Reader* track_reader;
@@ -479,8 +517,8 @@ dvda_open_track_reader(DVDA* dvda, DVDA_Track* track)
     unsigned pad_2_size;
 
     /*open an AOB reader for the given disc*/
-    if ((aob_reader = aob_reader_open(dvda->audio_ts_path,
-                                      dvda->device,
+    if ((aob_reader = aob_reader_open(track->disc.audio_ts,
+                                      track->disc.device,
                                       track->titleset_number)) == NULL) {
         return NULL;
     }
@@ -713,6 +751,29 @@ dvda_read(DVDA_Track_Reader* reader,
 /*******************************************************************
  *                  private function implementations               *
  *******************************************************************/
+
+void
+disc_path_init(struct disc_path *path,
+               const char *audio_ts_path,
+               const char *device)
+{
+    path->audio_ts = strdup(audio_ts_path);
+    path->device = device ? strdup(device) : NULL;
+}
+
+void
+disc_path_copy(const struct disc_path *source,
+               struct disc_path *target)
+{
+    disc_path_init(target, source->audio_ts, source->device);
+}
+
+void
+disc_path_free(struct disc_path *path)
+{
+    free(path->audio_ts);
+    free(path->device);
+}
 
 static unsigned
 get_titleset_count(const char *audio_ts_ifo)
