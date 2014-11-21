@@ -31,6 +31,14 @@ STATIC_LIBRARY = libdvd-audio.a
 
 SHARED_LIBRARY = libdvd-audio.so.$(MAJOR_VERSION).$(MINOR_VERSION).$(RELEASE_VERSION)
 
+SHARED_LIBRARY_LINK_1 = libdvd-audio.so.$(MAJOR_VERSION)
+
+SHARED_LIBRARY_LINK_2 = libdvd-audio.so
+
+SHARED_LIBRARIES = $(SHARED_LIBRARY) \
+$(SHARED_LIBRARY_LINK_1) \
+$(SHARED_LIBRARY_LINK2)
+
 BINARIES = dvda-debug-info dvda2wav
 
 PKG_CONFIG_METADATA = libdvd-audio.pc
@@ -44,12 +52,12 @@ else
 	AOB_FLAGS =
 endif
 
-all: $(STATIC_LIBRARY) $(SHARED_LIBRARY) $(BINARIES) $(PKG_CONFIG_METADATA)
+all: $(STATIC_LIBRARY) $(SHARED_LIBRARIES) $(BINARIES) $(PKG_CONFIG_METADATA)
 
-install: $(STATIC_LIBRARY) $(SHARED_LIBRARY) $(BINARIES) $(PKG_CONFIG_METADATA)
+install: $(STATIC_LIBRARY) $(SHARED_LIBRARIES) $(BINARIES) $(PKG_CONFIG_METADATA)
 	install -m 644 $(SHARED_LIBRARY) $(LIB_DIR)
-	ln -sf $(LIB_DIR)/$(SHARED_LIBRARY) $(LIB_DIR)/libdvd-audio.so.$(MAJOR_VERSION)
-	ln -sf $(LIB_DIR)/$(SHARED_LIBRARY) $(LIB_DIR)/libdvd-audio.so
+	cp -Pp $(SHARED_LIBRARY_LINK_1) $(LIB_DIR)
+	cp -Pp $(SHARED_LIBRARY_LINK_2) $(LIB_DIR)
 	install -m 644 $(STATIC_LIBRARY) $(LIB_DIR)
 	install -m 644 include/dvd-audio.h $(INCLUDE_DIR)
 	install -m 755 $(BINARIES) $(BIN_DIR)
@@ -63,6 +71,12 @@ libdvd-audio.a: $(DVDA_OBJS)
 
 $(SHARED_LIBRARY): $(DVDA_OBJS)
 	$(CC) $(FLAGS) -Wl,-soname,libdvd-audio.so.$(MAJOR_VERSION) -shared -o $@ $(DVDA_OBJS)
+
+$(SHARED_LIBRARY_LINK_1): $(SHARED_LIBRARY)
+	ln -sf $< $@
+
+$(SHARED_LIBRARY_LINK_2): $(SHARED_LIBRARY)
+	ln -sf $< $@
 
 dvd-audio.o: include/dvd-audio.h src/dvd-audio.c
 	$(CC) $(FLAGS) -c src/dvd-audio.c -I include
