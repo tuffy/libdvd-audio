@@ -170,6 +170,11 @@ read_audio_packet_header(BitstreamReader* packet_reader,
 int
 decode_sector(DVDA_Track_Reader* reader, aa_int* samples);
 
+int
+decode_audio_packet(DVDA_Track_Reader* reader,
+                    BitstreamReader* packet_reader,
+                    aa_int* samples);
+
 /*given a 4 bit packed field,
   returns the bits-per-sample which is either 16, 20 or 24*/
 static unsigned
@@ -1055,52 +1060,7 @@ decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
             sector_reader->close(sector_reader);
             return 1;
         } else if (stream_id == AUDIO_STREAM_ID) {
-            unsigned codec_id;
-            unsigned pad_2_size;
-
-            if (!setjmp(*br_try(packet_reader))) {
-
-                read_audio_packet_header(packet_reader,
-                                         &codec_id,
-                                         &pad_2_size);
-
-                switch (codec_id) {
-                case PCM_CODEC_ID:
-                    {
-                        struct stream_parameters parameters;
-
-                        dvda_pcmdecoder_decode_params(packet_reader,
-                                                      &parameters);
-
-                        if (!dvda_params_equal(&reader->parameters,
-                                               &parameters)) {
-                            /*some stream parameters mismatch*/
-                            br_abort(packet_reader);
-                        }
-
-                        packet_reader->skip_bytes(packet_reader,
-                                                  pad_2_size - 9);
-
-                        dvda_pcmdecoder_decode_packet(reader->decoder.pcm,
-                                                      packet_reader,
-                                                      samples);
-                    }
-                    break;
-                case MLP_CODEC_ID:
-                    packet_reader->skip_bytes(packet_reader, pad_2_size);
-                    dvda_mlpdecoder_decode_packet(reader->decoder.mlp,
-                                                  packet_reader,
-                                                  samples);
-                    break;
-                default:
-                    /*unknown audio codec, so ignore packet*/
-                    break;
-                }
-
-                br_etry(packet_reader);
-            } else {
-                /*some I/O error reading from packet*/
-                br_etry(packet_reader);
+            if (decode_audio_packet(reader, packet_reader, samples)) {
                 packet_reader->close(packet_reader);
                 sector_reader->close(sector_reader);
                 return 1;
@@ -1113,6 +1073,63 @@ decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
     sector_reader->close(sector_reader);
 
     return 0;
+}
+
+int
+decode_audio_packet(DVDA_Track_Reader* reader,
+                    BitstreamReader* packet_reader,
+                    aa_int* samples)
+{
+    if (!setjmp(*br_try(packet_reader))) {
+        unsigned codec_id;
+        unsigned pad_2_size;
+
+        read_audio_packet_header(packet_reader,
+                                 &codec_id,
+                                 &pad_2_size);
+
+        /*FIXME - ensure audio codec is the same as the reader's codec*/
+
+        switch (codec_id) {
+        case PCM_CODEC_ID:
+            {
+                struct stream_parameters parameters;
+
+                dvda_pcmdecoder_decode_params(packet_reader,
+                                              &parameters);
+
+                if (!dvda_params_equal(&reader->parameters,
+                                       &parameters)) {
+                    /*some stream parameters mismatch*/
+                    br_abort(packet_reader);
+                }
+
+                packet_reader->skip_bytes(packet_reader,
+                                          pad_2_size - 9);
+
+                dvda_pcmdecoder_decode_packet(reader->decoder.pcm,
+                                              packet_reader,
+                                              samples);
+            }
+            break;
+        case MLP_CODEC_ID:
+            packet_reader->skip_bytes(packet_reader, pad_2_size);
+            dvda_mlpdecoder_decode_packet(reader->decoder.mlp,
+                                          packet_reader,
+                                          samples);
+            break;
+        default:
+            /*unknown audio codec, so ignore packet*/
+            break;
+        }
+
+        br_etry(packet_reader);
+        return 0;
+    } else {
+        /*some I/O error reading from packet*/
+        br_etry(packet_reader);
+        return 1;
+    }
 }
 
 static unsigned

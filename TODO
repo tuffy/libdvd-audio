@@ -55,11 +55,34 @@
 ** DONE Make both static and dynamic libraries
 ** DONE Add .pc file for pkg-config
    Make this consistent with other libraries like libcdio
-** TODO Verify utilities for errors
+** DONE Verify utilities for errors
    Run Valgrind over them to ensure there's no memory leaks
    or other access errors.
-** TODO Add library documentation
-*** TODO Add RST file for the web
+** DONE Add library documentation
+*** DONE Add RST file for the web
+** TODO Handle tracks that don't fall on packet boundaries
+   The "start sector" field in the ATX_01_0.IFO file
+   should indicate which sector in which ATS_01_X.AOB file
+   the track starts on.
+
+   Only sometimes tracks don't start on the first audio packet of the sector
+   so one "puts the needle down" right in the middle of an MLP frame.
+   Sometimes tracks don't even start in that sector at all
+   for a bit of added stupidity.
+
+   This is why the previous implementation treated the MLP tracks
+   as one big stream and split it at rip-time by PTS ticks
+   just to overcome that silliness, but individual tracks in an
+   MLP stream may not be consistent either in terms of stream parameters.
+
+   Tracks will be handled correctly to match the API this time around
+   via as much stream probing as it takes.
+* TODO Finish version 1.1
 ** TODO Add format documentation
    Overhaul the documentation on how to read and decode DVD-A discs
    to be a bit more comprehensive.
+** TODO Add some optimization
+   see if there's any obvious bits that could be optimized
+** TODO Add better error reporting
+   It might be useful to generate specific error codes
+   when some problem occurs opening things or during decoding.
