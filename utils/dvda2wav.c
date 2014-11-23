@@ -296,11 +296,13 @@ extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path)
         return;
     }
 
-    printf("Extracting %s track  %u channels  %u Hz  %u bps\n",
+    printf("Extracting %s track  %u channels  %u Hz  "
+            "%u bps  %" PRIu64" PCM frames\n",
            (dvda_codec(track_reader) == DVDA_MLP ? "MLP" : "PCM"),
            dvda_channel_count(track_reader),
            dvda_sample_rate(track_reader),
-           dvda_bits_per_sample(track_reader));
+           dvda_bits_per_sample(track_reader),
+           dvda_total_pcm_frames(track_reader));
 
     output = bw_open(output_file, BS_LITTLE_ENDIAN);
 

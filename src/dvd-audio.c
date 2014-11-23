@@ -115,18 +115,18 @@ struct DVDA_Track_Reader_s {
  *******************************************************************/
 
 /*initializes a disc_path structure with the given paths*/
-void
+static void
 disc_path_init(struct disc_path *path,
                const char *audio_ts_path,
                const char *device);
 
 /*clones the values of the source disc_path to target*/
-void
+static void
 disc_path_copy(const struct disc_path *source,
                struct disc_path *target);
 
 /*frees the values in the given disc_path*/
-void
+static void
 disc_path_free(struct disc_path *path);
 
 /*given a full path to the AUDIO_TS.IFO file
@@ -148,7 +148,7 @@ open_mlp_track_reader(AOB_Reader* aob_reader,
                       unsigned pad_2_size);
 
 /*returns 0 on success, 1 on failure*/
-int
+static int
 read_pack_header(BitstreamReader *sector_reader,
                  uint64_t *pts,
                  unsigned *SCR_extension,
@@ -161,19 +161,31 @@ static BitstreamReader*
 read_packet(BitstreamReader* sector_reader, unsigned* stream_id);
 
 /*reads the header of an audio packet following the 48 bit packet header*/
-void
+static void
 read_audio_packet_header(BitstreamReader* packet_reader,
                          unsigned *codec_id,
                          unsigned *pad_2_size);
 
 /*returns 0 on success, 1 on failure*/
-int
+static int
 decode_sector(DVDA_Track_Reader* reader, aa_int* samples);
 
-int
+static int
 decode_audio_packet(DVDA_Track_Reader* reader,
                     BitstreamReader* packet_reader,
                     aa_int* samples);
+
+/*given an AOB reader and packet data (not including header or pad 2 block)
+  locates the first set of stream parameters
+  and dumps the remaining MLP data in mlp_data
+  for later processing
+
+  returns the number of bytes skipped to reach the parameters*/
+static unsigned
+locate_mlp_parameters(AOB_Reader* aob_reader,
+                      BitstreamReader* packet_reader,
+                      struct stream_parameters* parameters,
+                      BitstreamQueue* mlp_data);
 
 /*given a 4 bit packed field,
   returns the bits-per-sample which is either 16, 20 or 24*/
@@ -751,7 +763,7 @@ dvda_read(DVDA_Track_Reader* reader,
  *                  private function implementations               *
  *******************************************************************/
 
-void
+static void
 disc_path_init(struct disc_path *path,
                const char *audio_ts_path,
                const char *device)
@@ -760,14 +772,14 @@ disc_path_init(struct disc_path *path,
     path->device = device ? strdup(device) : NULL;
 }
 
-void
+static void
 disc_path_copy(const struct disc_path *source,
                struct disc_path *target)
 {
     disc_path_init(target, source->audio_ts, source->device);
 }
 
-void
+static void
 disc_path_free(struct disc_path *path)
 {
     free(path->audio_ts);
@@ -865,12 +877,11 @@ open_mlp_track_reader(AOB_Reader* aob_reader,
                       unsigned pts_length,
                       unsigned pad_2_size)
 {
-    unsigned sync_words;
-    unsigned stream_type;
     unsigned channel_count;
     unsigned c;
     double pts_length_d = pts_length;
-    br_pos_t* mlp_frame_start;
+    unsigned mlp_frame_offset;
+    BitstreamQueue* mlp_data;
 
     DVDA_Track_Reader* track_reader = malloc(sizeof(DVDA_Track_Reader));
     track_reader->aob_reader = aob_reader;
@@ -882,28 +893,15 @@ open_mlp_track_reader(AOB_Reader* aob_reader,
     /*skip initial padding*/
     audio_packet->skip_bytes(audio_packet, pad_2_size);
 
-    /*walk through packet looking for first MLP frame*/
-    /*FIXME*/
+    mlp_data = br_open_queue(BS_BIG_ENDIAN);
 
-    /*pull stream attributes from frame's major sync*/
-    mlp_frame_start = audio_packet->getpos(audio_packet);
-    audio_packet->parse(audio_packet, "4p 12p 16p 24u 8u",
-                        &sync_words, &stream_type);
+    mlp_frame_offset = locate_mlp_parameters(aob_reader,
+                                             audio_packet,
+                                             &track_reader->parameters,
+                                             mlp_data);
 
-    if ((sync_words == 0xF8726F) && (stream_type == 0xBB)) {
-        audio_packet->parse(audio_packet, "4u 4u 4u 4u 11p 5u 48p",
-                            &(track_reader->parameters.group_0_bps),
-                            &(track_reader->parameters.group_1_bps),
-                            &(track_reader->parameters.group_0_rate),
-                            &(track_reader->parameters.group_1_rate),
-                            &(track_reader->parameters.channel_assignment));
-        audio_packet->setpos(audio_packet, mlp_frame_start);
-        mlp_frame_start->del(mlp_frame_start);
-    } else {
-        /*FIXME - continue walking the packet data looking for a sync*/
-        printf("major sync not found\n");
-        mlp_frame_start->del(mlp_frame_start);
-        abort();
+    if (mlp_frame_offset) {
+        fprintf(stderr, "MLP frame offset : %u\n", mlp_frame_offset);
     }
 
     pts_length_d *= unpack_sample_rate(track_reader->parameters.group_0_rate);
@@ -926,13 +924,15 @@ open_mlp_track_reader(AOB_Reader* aob_reader,
 
     /*decode remaining MLP frames in packet to buffer*/
     dvda_mlpdecoder_decode_packet(track_reader->decoder.mlp,
-                                  audio_packet,
+                                  (BitstreamReader*)mlp_data,
                                   track_reader->channel_data);
+
+    mlp_data->close(mlp_data);
 
     return track_reader;
 }
 
-int
+static int
 read_pack_header(BitstreamReader *sector_reader,
                  uint64_t *pts,
                  unsigned *SCR_extension,
@@ -1016,7 +1016,7 @@ read_packet(BitstreamReader* sector_reader, unsigned* stream_id)
     }
 }
 
-void
+static void
 read_audio_packet_header(BitstreamReader* packet_reader,
                          unsigned *codec_id,
                          unsigned *pad_2_size)
@@ -1028,7 +1028,7 @@ read_audio_packet_header(BitstreamReader* packet_reader,
     packet_reader->parse(packet_reader, "8u 8p 8p 8u", codec_id, pad_2_size);
 }
 
-int
+static int
 decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
 {
     uint8_t sector[SECTOR_SIZE];
@@ -1052,7 +1052,6 @@ decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
 
     /*for each audio packet in sector*/
     do {
-        /*ensure codec matches our decoder's codec*/
         unsigned stream_id;
         BitstreamReader* packet_reader = read_packet(sector_reader, &stream_id);
 
@@ -1075,7 +1074,7 @@ decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
     return 0;
 }
 
-int
+static int
 decode_audio_packet(DVDA_Track_Reader* reader,
                     BitstreamReader* packet_reader,
                     aa_int* samples)
@@ -1129,6 +1128,64 @@ decode_audio_packet(DVDA_Track_Reader* reader,
         /*some I/O error reading from packet*/
         br_etry(packet_reader);
         return 1;
+    }
+}
+
+static unsigned
+locate_mlp_parameters(AOB_Reader* aob_reader,
+                      BitstreamReader* packet_reader,
+                      struct stream_parameters* parameters,
+                      BitstreamQueue* mlp_data)
+{
+    unsigned bytes_skipped = 0;
+    BitstreamReader* mlp_reader = (BitstreamReader*)mlp_data;
+
+    packet_reader->enqueue(packet_reader,
+                           packet_reader->size(packet_reader),
+                           mlp_data);
+
+    for (;;) {
+        unsigned sync_words;
+        unsigned stream_type;
+        br_pos_t* mlp_frame_start;
+
+        if (mlp_data->size(mlp_data) < 8) {
+            /*extend queue with additional packets from aob_reader*/
+            /*FIXME*/
+            fprintf(stderr, "*** FIXME : data queue exhausted\n");
+            abort();
+        }
+
+        /*look for major sync*/
+        mlp_frame_start = mlp_reader->getpos(mlp_reader);
+        mlp_reader->parse(mlp_reader, "4p 12p 16p 24u 8u",
+                          &sync_words, &stream_type);
+
+        /*if major sync is found*/
+        if ((sync_words == 0xF8726F) && (stream_type == 0xBB)) {
+            /*populate stream parameters from frame's major sync*/
+            mlp_reader->parse(mlp_reader, "4u 4u 4u 4u 11p 5u 48p",
+                              &parameters->group_0_bps,
+                              &parameters->group_1_bps,
+                              &parameters->group_0_rate,
+                              &parameters->group_1_rate,
+                              &parameters->channel_assignment);
+
+            /*rewind to start and frame and exit*/
+            mlp_reader->setpos(mlp_reader, mlp_frame_start);
+            mlp_frame_start->del(mlp_frame_start);
+
+            return bytes_skipped;
+        } else {  /*if major sync is not found*/
+            /*rewind to start of frame*/
+            mlp_reader->setpos(mlp_reader, mlp_frame_start);
+
+            /*advance 1 byte*/
+            mlp_reader->skip(mlp_reader, 8);
+
+            /*and continue looking*/
+            bytes_skipped += 1;
+        }
     }
 }
 
