@@ -1,4 +1,4 @@
-FLAGS = -Wall -O2 -fPIC
+FLAGS = -Wall -O2 -g -fPIC
 LIB_DIR = /usr/local/lib
 INCLUDE_DIR = /usr/local/include
 BIN_DIR = /usr/local/bin

@@ -166,11 +166,12 @@ read_audio_packet_header(BitstreamReader* packet_reader,
                          unsigned *codec_id,
                          unsigned *pad_2_size);
 
-/*returns 0 on success, 1 on failure*/
-static int
+/*returns the amount of PCM frames read*/
+static unsigned
 decode_sector(DVDA_Track_Reader* reader, aa_int* samples);
 
-static int
+/*returns the aount of PCM frames read*/
+static unsigned
 decode_audio_packet(DVDA_Track_Reader* reader,
                     BitstreamReader* packet_reader,
                     aa_int* samples);
@@ -714,12 +715,6 @@ dvda_riff_wave_channel_mask(DVDA_Track_Reader *reader)
     }
 }
 
-uint64_t
-dvda_total_pcm_frames(DVDA_Track_Reader* reader)
-{
-    return reader->total_pcm_frames;
-}
-
 unsigned
 dvda_read(DVDA_Track_Reader* reader,
           unsigned pcm_frames,
@@ -728,7 +723,7 @@ dvda_read(DVDA_Track_Reader* reader,
     const unsigned to_read = MIN(reader->remaining_pcm_frames, pcm_frames);
     const unsigned channel_count = dvda_channel_count(reader);
     aa_int* channel_data = reader->channel_data;
-    unsigned i;
+    unsigned amount_read;
     unsigned c;
 
     if (!to_read) {
@@ -737,26 +732,35 @@ dvda_read(DVDA_Track_Reader* reader,
 
     /*populate per-channel buffer with samples as needed*/
     while (channel_data->_[0]->len < to_read) {
-        if (decode_sector(reader, channel_data)) {
+        if (!decode_sector(reader, channel_data)) {
+            /*no more data from stream*/
             break;
         }
     }
 
+    amount_read = MIN(to_read, channel_data->_[0]->len);
+
     /*transfer contents of per-channel buffer to output buffer*/
     for (c = 0; c < channel_count; c++) {
         a_int* channel = channel_data->_[c];
+        unsigned i;
+        assert(channel->len >= amount_read);
 
-        for (i = 0; i < to_read; i++) {
+        for (i = 0; i < amount_read; i++) {
             buffer[i * channel_count + c] = channel->_[i];
         }
 
         /*remove output buffer contents from per-channel buffer*/
-        channel->de_head(channel, to_read, channel);
+        channel->de_head(channel, amount_read, channel);
     }
 
-    reader->remaining_pcm_frames -= to_read;
+    if (amount_read == to_read) {
+        reader->remaining_pcm_frames -= amount_read;
+    } else {
+        reader->remaining_pcm_frames = 0;
+    }
 
-    return to_read;
+    return amount_read;
 }
 
 /*******************************************************************
@@ -1028,7 +1032,7 @@ read_audio_packet_header(BitstreamReader* packet_reader,
     packet_reader->parse(packet_reader, "8u 8p 8p 8u", codec_id, pad_2_size);
 }
 
-static int
+static unsigned
 decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
 {
     uint8_t sector[SECTOR_SIZE];
@@ -1036,10 +1040,11 @@ decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
     uint64_t pts;
     unsigned SCR_extension;
     unsigned bitrate;
+    unsigned pcm_frames_read = 0;
 
     /*read next sector from stream*/
     if (aob_reader_read(reader->aob_reader, sector)) {
-        return 1;
+        return 0;
     }
 
     sector_reader = br_open_buffer(sector, SECTOR_SIZE, BS_BIG_ENDIAN);
@@ -1047,7 +1052,7 @@ decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
     /*read pack header*/
     if (read_pack_header(sector_reader, &pts, &SCR_extension, &bitrate)) {
         sector_reader->close(sector_reader);
-        return 1;
+        return 0;
     }
 
     /*for each audio packet in sector*/
@@ -1059,10 +1064,14 @@ decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
             sector_reader->close(sector_reader);
             return 1;
         } else if (stream_id == AUDIO_STREAM_ID) {
-            if (decode_audio_packet(reader, packet_reader, samples)) {
+            const unsigned packet_frames =
+                decode_audio_packet(reader, packet_reader, samples);
+            if (packet_frames) {
+                pcm_frames_read += packet_frames;
+            } else {
                 packet_reader->close(packet_reader);
                 sector_reader->close(sector_reader);
-                return 1;
+                return pcm_frames_read;
             }
         }
 
@@ -1071,15 +1080,16 @@ decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
 
     sector_reader->close(sector_reader);
 
-    return 0;
+    return pcm_frames_read;
 }
 
-static int
+static unsigned
 decode_audio_packet(DVDA_Track_Reader* reader,
                     BitstreamReader* packet_reader,
                     aa_int* samples)
 {
     if (!setjmp(*br_try(packet_reader))) {
+        unsigned pcm_frames_read = 0;
         unsigned codec_id;
         unsigned pad_2_size;
 
@@ -1106,16 +1116,18 @@ decode_audio_packet(DVDA_Track_Reader* reader,
                 packet_reader->skip_bytes(packet_reader,
                                           pad_2_size - 9);
 
-                dvda_pcmdecoder_decode_packet(reader->decoder.pcm,
-                                              packet_reader,
-                                              samples);
+                pcm_frames_read =
+                    dvda_pcmdecoder_decode_packet(reader->decoder.pcm,
+                                                  packet_reader,
+                                                  samples);
             }
             break;
         case MLP_CODEC_ID:
             packet_reader->skip_bytes(packet_reader, pad_2_size);
-            dvda_mlpdecoder_decode_packet(reader->decoder.mlp,
-                                          packet_reader,
-                                          samples);
+            pcm_frames_read =
+                dvda_mlpdecoder_decode_packet(reader->decoder.mlp,
+                                              packet_reader,
+                                              samples);
             break;
         default:
             /*unknown audio codec, so ignore packet*/
@@ -1123,11 +1135,11 @@ decode_audio_packet(DVDA_Track_Reader* reader,
         }
 
         br_etry(packet_reader);
-        return 0;
+        return pcm_frames_read;
     } else {
         /*some I/O error reading from packet*/
         br_etry(packet_reader);
-        return 1;
+        return 0;
     }
 }
 

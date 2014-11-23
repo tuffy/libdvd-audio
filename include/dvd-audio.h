@@ -182,10 +182,6 @@ dvda_channel_count(DVDA_Track_Reader* reader);
 unsigned
 dvda_riff_wave_channel_mask(DVDA_Track_Reader *reader);
 
-/*returns the total length of the track in PCM frames*/
-uint64_t
-dvda_total_pcm_frames(DVDA_Track_Reader* reader);
-
 /*given a buffer with at least:
 
   dvda_channel_count(reader) * pcm_frames

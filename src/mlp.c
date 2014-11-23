@@ -464,7 +464,6 @@ decode_mlp_frame(MLPDecoder* decoder,
     for (s = 0; s < decoder->major_sync.substream_count; s++) {
         if (!read_substream_info(mlp_frame, &(decoder->substream[s].info))) {
             /*invalid extraword present value*/
-            assert(0);
             return 0;
         }
     }

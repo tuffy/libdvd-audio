@@ -289,6 +289,8 @@ extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path)
     const unsigned bits_per_sample = dvda_bits_per_sample(track_reader);
     int buffer[BUFFER_SIZE * channel_count];
     unsigned frames_read;
+    bw_pos_t *file_start;
+    unsigned total_pcm_frames = 0;
 
     if ((output_file = fopen(output_path, "wb")) == NULL) {
         fprintf(stderr, "*** Error: unable to open \"%s\" for writing\n",
@@ -296,24 +298,23 @@ extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path)
         return;
     }
 
-    printf("Extracting %s track  %u channels  %u Hz  "
-            "%u bps  %" PRIu64" PCM frames\n",
+    printf("Extracting %s track  %u channels  %u Hz  %u bps\n",
            (dvda_codec(track_reader) == DVDA_MLP ? "MLP" : "PCM"),
            dvda_channel_count(track_reader),
            dvda_sample_rate(track_reader),
-           dvda_bits_per_sample(track_reader),
-           dvda_total_pcm_frames(track_reader));
+           dvda_bits_per_sample(track_reader));
 
     output = bw_open(output_file, BS_LITTLE_ENDIAN);
 
     /*write initial RIFF WAVE header*/
+    file_start = output->getpos(output);
     write_wave_header(
         output,
         dvda_sample_rate(track_reader),
         channel_count,
         dvda_riff_wave_channel_mask(track_reader),
         bits_per_sample,
-        dvda_total_pcm_frames(track_reader));
+        total_pcm_frames);
 
     /*transfer data from track reader to data chunk*/
     while ((frames_read = dvda_read(track_reader,
@@ -323,7 +324,19 @@ extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path)
         for (i = 0; i < frames_read * channel_count; i++) {
             output->write_signed(output, bits_per_sample, buffer[i]);
         }
+        total_pcm_frames += frames_read;
     }
+
+    /*go back and write finished RIFF WAVE header*/
+    output->setpos(output, file_start);
+    file_start->del(file_start);
+    write_wave_header(
+        output,
+        dvda_sample_rate(track_reader),
+        channel_count,
+        dvda_riff_wave_channel_mask(track_reader),
+        bits_per_sample,
+        total_pcm_frames);
 
     output->close(output);
 

@@ -305,24 +305,6 @@ Track Reader Functions
    back center  ``0x100``
    ============ =========
 
-.. function:: uint64_t dvda_total_pcm_frames(DVDA_Track_Reader *reader)
-
-   Returns the total number of PCM frames in the given reader.
-   A PCM frame is a single set of samples across all the stream's channels.
-   That is, the total length of the stream in seconds can be calculated by:
-
-::
-
-   dvda_total_pcm_frames(reader) / dvda_sample_rate(reader)
-
-..
-
-   but the the total length of the stream in bytes can be calculated by:
-
-::
-
-   dvda_total_pcm_frames(reader) * dvda_channel_count(reader) * (dvda_bits_per_sample(reader) / 8)
-
 .. function:: unsigned dvda_read(DVDA_Track_Reader *reader, unsigned pcm_frames, int buffer[])
 
    Given a number of PCM frames and a buffer which contains at least:
