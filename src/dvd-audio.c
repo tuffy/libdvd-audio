@@ -846,7 +846,6 @@ open_mlp_track_reader(Packet_Reader* packet_reader,
     unsigned channel_count;
     unsigned c;
     double pts_length_d = pts_length;
-    unsigned mlp_frame_offset;
     BitstreamQueue* mlp_data;
 
     DVDA_Track_Reader* track_reader = malloc(sizeof(DVDA_Track_Reader));
@@ -861,14 +860,11 @@ open_mlp_track_reader(Packet_Reader* packet_reader,
 
     mlp_data = br_open_queue(BS_BIG_ENDIAN);
 
-    mlp_frame_offset = locate_mlp_parameters(packet_reader,
-                                             audio_packet,
-                                             &track_reader->parameters,
-                                             mlp_data);
-
-    if (mlp_frame_offset) {
-        fprintf(stderr, "MLP frame offset : %u\n", mlp_frame_offset);
-    }
+    /*FIXME - save offset somewhere?*/
+    locate_mlp_parameters(packet_reader,
+                          audio_packet,
+                          &track_reader->parameters,
+                          mlp_data);
 
     pts_length_d *= unpack_sample_rate(track_reader->parameters.group_0_rate);
     pts_length_d /= PTS_PER_SECOND;
@@ -990,9 +986,24 @@ locate_mlp_parameters(Packet_Reader* packet_reader,
 
         if (mlp_data->size(mlp_data) < 8) {
             /*extend queue with additional packets from packet_reader*/
-            /*FIXME*/
-            fprintf(stderr, "*** FIXME : data queue exhausted\n");
-            abort();
+            BitstreamReader *audio_packet =
+                packet_reader_next_audio_packet(packet_reader);
+            unsigned codec_id;
+            unsigned pad_2_size;
+
+            if (!audio_packet) {
+                /*FIXME - end of stream hit, return error*/
+                abort();
+            }
+            read_audio_packet_header(audio_packet, &codec_id, &pad_2_size);
+            /*FIXME - ensure codec is MLP*/
+
+            /*FIXME - check for read error*/
+            audio_packet->skip_bytes(audio_packet, pad_2_size);
+
+            audio_packet->enqueue(audio_packet,
+                                  audio_packet->size(audio_packet),
+                                  mlp_data);
         }
 
         /*look for major sync*/
