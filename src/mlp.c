@@ -154,9 +154,8 @@ decode_mlp_frame(MLPDecoder* decoder,
 static int
 read_major_sync(BitstreamReader *mlp_frame, struct major_sync *major_sync);
 
-/*attempts to read a substream info block from the MLP frame
-  returns 1 if successful, 0 if unsuccessful*/
-static int
+/*attempts to read a substream info block from the MLP frame*/
+static void
 read_substream_info(BitstreamReader *mlp_frame,
                     struct substream_info *substream_info);
 
@@ -462,9 +461,12 @@ decode_mlp_frame(MLPDecoder* decoder,
 
     /*read 1 substream info per substream*/
     for (s = 0; s < decoder->major_sync.substream_count; s++) {
-        if (!read_substream_info(mlp_frame, &(decoder->substream[s].info))) {
-            /*invalid extraword present value*/
-            return 0;
+        read_substream_info(mlp_frame, &(decoder->substream[s].info));
+        if (decoder->substream[s].info.extraword_present) {
+            fprintf(stderr,
+                    "*** %d Debug : extra word present in substream %u\n",
+                    __LINE__, s);
+            mlp_frame->skip(mlp_frame, 16);
         }
     }
 
@@ -654,7 +656,7 @@ read_major_sync(BitstreamReader *mlp_frame, struct major_sync *major_sync)
     }
 }
 
-static int
+static void
 read_substream_info(BitstreamReader *mlp_frame,
                     struct substream_info *substream_info)
 {
@@ -666,8 +668,6 @@ read_substream_info(BitstreamReader *mlp_frame,
                      &(substream_info->substream_end));
 
     substream_info->substream_end *= 2;
-
-    return (substream_info->extraword_present == 0);
 }
 
 static BitstreamReader*

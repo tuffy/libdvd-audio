@@ -60,7 +60,7 @@
    or other access errors.
 ** DONE Add library documentation
 *** DONE Add RST file for the web
-** TODO Handle tracks that don't fall on packet boundaries
+** DONE Handle tracks that don't fall on packet boundaries
    The "start sector" field in the ATX_01_0.IFO file
    should indicate which sector in which ATS_01_X.AOB file
    the track starts on.
@@ -77,6 +77,11 @@
 
    Tracks will be handled correctly to match the API this time around
    via as much stream probing as it takes.
+** TODO Handle end of tracks correctly
+   I'd been converting PTS ticks to PCM frames and using that as the total track
+   length, but that's not quite right either.
+
+   Need to figure out a more accurate way to find a track's end.
 * TODO Finish version 1.1
 ** TODO Add format documentation
    Overhaul the documentation on how to read and decode DVD-A discs
