@@ -17,6 +17,9 @@
  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 *******************************************************/
 
+#ifndef __LIBDVDAUDIO_AOB_H__
+#define __LIBDVDAUDIO_AOB_H__
+
 #include <stdint.h>
 
 struct AOB_Reader_s;
@@ -46,3 +49,5 @@ aob_reader_read(AOB_Reader *reader, uint8_t *sector_data);
   and returns 0 on success, 1 on failure*/
 int
 aob_reader_seek(AOB_Reader *reader, unsigned sector_number);
+
+#endif

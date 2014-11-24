@@ -26,12 +26,12 @@
 #include "array.h"
 #include "audio_ts.h"
 #include "aob.h"
+#include "packet.h"
 #include "pcm.h"
 #include "mlp.h"
 #include "stream_parameters.h"
 
 #define SECTOR_SIZE 2048
-#define AUDIO_STREAM_ID 0xBD
 #define PCM_CODEC_ID 0xA0
 #define MLP_CODEC_ID 0xA1
 
@@ -95,7 +95,7 @@ struct DVDA_Track_s {
 };
 
 struct DVDA_Track_Reader_s {
-    AOB_Reader* aob_reader;
+    Packet_Reader* packet_reader;
 
     dvda_codec_t codec;
     struct stream_parameters parameters;
@@ -136,39 +136,22 @@ static unsigned
 get_titleset_count(const char *audio_ts_ifo);
 
 static DVDA_Track_Reader*
-open_pcm_track_reader(AOB_Reader* aob_reader,
+open_pcm_track_reader(Packet_Reader* packet_reader,
                       BitstreamReader* audio_packet,
                       unsigned pts_length,
                       unsigned pad_2_size);
 
 static DVDA_Track_Reader*
-open_mlp_track_reader(AOB_Reader* aob_reader,
+open_mlp_track_reader(Packet_Reader* packet_reader,
                       BitstreamReader* audio_packet,
                       unsigned pts_length,
                       unsigned pad_2_size);
-
-/*returns 0 on success, 1 on failure*/
-static int
-read_pack_header(BitstreamReader *sector_reader,
-                 uint64_t *pts,
-                 unsigned *SCR_extension,
-                 unsigned *bitrate);
-
-/*returns the next packet in the sector and its stream ID
-  or NULL if some error occurs reading the packet
-  this does not include the 48 bit packet header*/
-static BitstreamReader*
-read_packet(BitstreamReader* sector_reader, unsigned* stream_id);
 
 /*reads the header of an audio packet following the 48 bit packet header*/
 static void
 read_audio_packet_header(BitstreamReader* packet_reader,
                          unsigned *codec_id,
                          unsigned *pad_2_size);
-
-/*returns the amount of PCM frames read*/
-static unsigned
-decode_sector(DVDA_Track_Reader* reader, aa_int* samples);
 
 /*returns the aount of PCM frames read*/
 static unsigned
@@ -183,8 +166,8 @@ decode_audio_packet(DVDA_Track_Reader* reader,
 
   returns the number of bytes skipped to reach the parameters*/
 static unsigned
-locate_mlp_parameters(AOB_Reader* aob_reader,
-                      BitstreamReader* packet_reader,
+locate_mlp_parameters(Packet_Reader* packet_reader,
+                      BitstreamReader* packet_data,
                       struct stream_parameters* parameters,
                       BitstreamQueue* mlp_data);
 
@@ -523,14 +506,9 @@ DVDA_Track_Reader*
 dvda_open_track_reader(const DVDA_Track* track)
 {
     AOB_Reader* aob_reader;
-    DVDA_Track_Reader* track_reader;
-    uint8_t sector[SECTOR_SIZE];
-    BitstreamReader* sector_reader;
+    Packet_Reader* packet_reader;
     BitstreamReader* audio_packet = NULL;
-    uint64_t current_PTS;
-    unsigned SCR_extension;
-    unsigned bitrate;
-    unsigned stream_id;
+    DVDA_Track_Reader* track_reader;
     unsigned codec_id;
     unsigned pad_2_size;
 
@@ -547,43 +525,15 @@ dvda_open_track_reader(const DVDA_Track* track)
         return NULL;
     }
 
-    /*read pack header for PTS offset*/
-    if (aob_reader_read(aob_reader, sector)) {
-        aob_reader_close(aob_reader);
-        return NULL;
-    }
+    /*wrap AOB reader with packet reader*/
+    packet_reader = packet_reader_open(aob_reader);
 
-    sector_reader = br_open_buffer(sector, SECTOR_SIZE, BS_BIG_ENDIAN);
-
-    if (read_pack_header(sector_reader,
-                         &current_PTS,
-                         &SCR_extension,
-                         &bitrate)) {
-        sector_reader->close(sector_reader);
-        aob_reader_close(aob_reader);
-        return NULL;
-    }
-
-    /*look for first audio packet*/
-    do {
-        audio_packet = read_packet(sector_reader, &stream_id);
-        if (!audio_packet) {
-            sector_reader->close(sector_reader);
-            aob_reader_close(aob_reader);
-            return NULL;
-        } else if (stream_id == AUDIO_STREAM_ID) {
-            break;
-        } else {
-            audio_packet->close(audio_packet);
-            audio_packet = NULL;
-        }
-    } while (sector_reader->size(sector_reader));
-
-    sector_reader->close(sector_reader);
+    /*get first audio packet from packet reader*/
+    audio_packet = packet_reader_next_audio_packet(packet_reader);
 
     if (!audio_packet) {
-        /*got to end of sector without hitting an audio packet*/
-        aob_reader_close(aob_reader);
+        /*got to end of stream without hitting an audio packet*/
+        packet_reader_close(packet_reader);
         return NULL;
     }
 
@@ -591,20 +541,20 @@ dvda_open_track_reader(const DVDA_Track* track)
 
     switch (codec_id) {
     case PCM_CODEC_ID:
-        track_reader = open_pcm_track_reader(aob_reader,
+        track_reader = open_pcm_track_reader(packet_reader,
                                              audio_packet,
                                              track->pts_length,
                                              pad_2_size);
         break;
     case MLP_CODEC_ID:
-        track_reader = open_mlp_track_reader(aob_reader,
+        track_reader = open_mlp_track_reader(packet_reader,
                                              audio_packet,
                                              track->pts_length,
                                              pad_2_size);
         break;
     default:  /*unknown codec ID*/
         track_reader = NULL;
-        aob_reader_close(aob_reader);
+        packet_reader_close(packet_reader);
         break;
     }
 
@@ -616,7 +566,7 @@ dvda_open_track_reader(const DVDA_Track* track)
 void
 dvda_close_track_reader(DVDA_Track_Reader* reader)
 {
-    aob_reader_close(reader->aob_reader);
+    packet_reader_close(reader->packet_reader);
     switch (reader->codec) {
     case DVDA_PCM:
         dvda_close_pcmdecoder(reader->decoder.pcm);
@@ -732,8 +682,20 @@ dvda_read(DVDA_Track_Reader* reader,
 
     /*populate per-channel buffer with samples as needed*/
     while (channel_data->_[0]->len < to_read) {
-        if (!decode_sector(reader, channel_data)) {
-            /*no more data from stream*/
+        BitstreamReader *audio_packet =
+            packet_reader_next_audio_packet(reader->packet_reader);
+        if (audio_packet) {
+            const unsigned pcm_frames_read =
+                decode_audio_packet(reader, audio_packet, channel_data);
+
+            audio_packet->close(audio_packet);
+
+            if (!pcm_frames_read) {
+                /*no more data from next audio packet*/
+                break;
+            }
+        } else {
+            /*no more audio packets in stream*/
             break;
         }
     }
@@ -827,7 +789,7 @@ get_titleset_count(const char *audio_ts_ifo)
 }
 
 static DVDA_Track_Reader*
-open_pcm_track_reader(AOB_Reader* aob_reader,
+open_pcm_track_reader(Packet_Reader* packet_reader,
                       BitstreamReader* audio_packet,
                       unsigned pts_length,
                       unsigned pad_2_size)
@@ -837,7 +799,7 @@ open_pcm_track_reader(AOB_Reader* aob_reader,
     double pts_length_d = pts_length;
 
     DVDA_Track_Reader* track_reader = malloc(sizeof(DVDA_Track_Reader));
-    track_reader->aob_reader = aob_reader;
+    track_reader->packet_reader = packet_reader;
 
     /*FIXME - check for I/O errors?*/
 
@@ -876,7 +838,7 @@ open_pcm_track_reader(AOB_Reader* aob_reader,
 }
 
 static DVDA_Track_Reader*
-open_mlp_track_reader(AOB_Reader* aob_reader,
+open_mlp_track_reader(Packet_Reader* packet_reader,
                       BitstreamReader* audio_packet,
                       unsigned pts_length,
                       unsigned pad_2_size)
@@ -888,7 +850,7 @@ open_mlp_track_reader(AOB_Reader* aob_reader,
     BitstreamQueue* mlp_data;
 
     DVDA_Track_Reader* track_reader = malloc(sizeof(DVDA_Track_Reader));
-    track_reader->aob_reader = aob_reader;
+    track_reader->packet_reader = packet_reader;
 
     track_reader->codec = DVDA_MLP;
 
@@ -899,7 +861,7 @@ open_mlp_track_reader(AOB_Reader* aob_reader,
 
     mlp_data = br_open_queue(BS_BIG_ENDIAN);
 
-    mlp_frame_offset = locate_mlp_parameters(aob_reader,
+    mlp_frame_offset = locate_mlp_parameters(packet_reader,
                                              audio_packet,
                                              &track_reader->parameters,
                                              mlp_data);
@@ -936,90 +898,6 @@ open_mlp_track_reader(AOB_Reader* aob_reader,
     return track_reader;
 }
 
-static int
-read_pack_header(BitstreamReader *sector_reader,
-                 uint64_t *pts,
-                 unsigned *SCR_extension,
-                 unsigned *bitrate)
-{
-    if (!setjmp(*br_try(sector_reader))) {
-        unsigned sync_bytes;
-        unsigned pad[6];
-        unsigned PTS_high;
-        unsigned PTS_mid;
-        unsigned PTS_low;
-        unsigned stuffing_count;
-
-        sector_reader->parse(
-            sector_reader,
-            "32u 2u 3u 1u 15u 1u 15u 1u 9u 1u 22u 2u 5p 3u",
-            &sync_bytes,     /*32 bits*/
-            &(pad[0]),       /* 2 bits*/
-            &PTS_high,       /* 3 bits*/
-            &(pad[1]),       /* 1 bit */
-            &PTS_mid,        /*15 bits*/
-            &(pad[2]),       /* 1 bit */
-            &PTS_low,        /*15 bits*/
-            &(pad[3]),       /* 1 bit */
-            SCR_extension,   /* 9 bits*/
-            &(pad[4]),       /* 1 bit */
-            bitrate,         /*22 bits*/
-            &(pad[5]),       /* 2 bits*/
-            &stuffing_count  /* 3 bits*/
-            );
-
-        sector_reader->skip(sector_reader, 8 * stuffing_count);
-
-        br_etry(sector_reader);
-
-        if (sync_bytes != 0x000001BA) {
-            return 1;
-        }
-
-        if ((pad[0] == 1) && (pad[1] == 1) && (pad[2] == 1) &&
-            (pad[3] == 1) && (pad[4] == 1) && (pad[5] == 3)) {
-            *pts = (PTS_high << 30) | (PTS_mid << 15) | PTS_low;
-            return 0;
-        } else {
-            return 1;
-        }
-    } else {
-        br_etry(sector_reader);
-        return 1;
-    }
-}
-
-static BitstreamReader*
-read_packet(BitstreamReader* sector_reader, unsigned* stream_id)
-{
-
-    if (!setjmp(*br_try(sector_reader))) {
-        unsigned start_code;
-        unsigned packet_length;
-        BitstreamReader *packet_data;
-
-        sector_reader->parse(sector_reader,
-                             "24u 8u 16u",
-                             &start_code,
-                             stream_id,
-                             &packet_length);
-
-        if (start_code != 1) {
-            br_etry(sector_reader);
-            return NULL;
-        }
-
-        packet_data = sector_reader->substream(sector_reader,
-                                               packet_length);
-
-        br_etry(sector_reader);
-        return packet_data;
-    } else {
-        br_etry(sector_reader);
-        return NULL;
-    }
-}
-
 static void
 read_audio_packet_header(BitstreamReader* packet_reader,
                          unsigned *codec_id,
@@ -1030,57 +908,6 @@ read_audio_packet_header(BitstreamReader* packet_reader,
     packet_reader->parse(packet_reader, "16p 8u", &pad_1_size);
     packet_reader->skip_bytes(packet_reader, pad_1_size);
     packet_reader->parse(packet_reader, "8u 8p 8p 8u", codec_id, pad_2_size);
-}
-
-static unsigned
-decode_sector(DVDA_Track_Reader* reader, aa_int* samples)
-{
-    uint8_t sector[SECTOR_SIZE];
-    BitstreamReader* sector_reader;
-    uint64_t pts;
-    unsigned SCR_extension;
-    unsigned bitrate;
-    unsigned pcm_frames_read = 0;
-
-    /*read next sector from stream*/
-    if (aob_reader_read(reader->aob_reader, sector)) {
-        return 0;
-    }
-
-    sector_reader = br_open_buffer(sector, SECTOR_SIZE, BS_BIG_ENDIAN);
-
-    /*read pack header*/
-    if (read_pack_header(sector_reader, &pts, &SCR_extension, &bitrate)) {
-        sector_reader->close(sector_reader);
-        return 0;
-    }
-
-    /*for each audio packet in sector*/
-    do {
-        unsigned stream_id;
-        BitstreamReader* packet_reader = read_packet(sector_reader, &stream_id);
-
-        if (!packet_reader) {
-            sector_reader->close(sector_reader);
-            return 1;
-        } else if (stream_id == AUDIO_STREAM_ID) {
-            const unsigned packet_frames =
-                decode_audio_packet(reader, packet_reader, samples);
-            if (packet_frames) {
-                pcm_frames_read += packet_frames;
-            } else {
-                packet_reader->close(packet_reader);
-                sector_reader->close(sector_reader);
-                return pcm_frames_read;
-            }
-        }
-
-        packet_reader->close(packet_reader);
-    } while (sector_reader->size(sector_reader));
-
-    sector_reader->close(sector_reader);
-
-    return pcm_frames_read;
 }
 
 static unsigned
@@ -1144,17 +971,17 @@ decode_audio_packet(DVDA_Track_Reader* reader,
 }
 
 static unsigned
-locate_mlp_parameters(AOB_Reader* aob_reader,
-                      BitstreamReader* packet_reader,
+locate_mlp_parameters(Packet_Reader* packet_reader,
+                      BitstreamReader* packet_data,
                       struct stream_parameters* parameters,
                       BitstreamQueue* mlp_data)
 {
     unsigned bytes_skipped = 0;
     BitstreamReader* mlp_reader = (BitstreamReader*)mlp_data;
 
-    packet_reader->enqueue(packet_reader,
-                           packet_reader->size(packet_reader),
-                           mlp_data);
+    packet_data->enqueue(packet_data,
+                         packet_data->size(packet_data),
+                         mlp_data);
 
     for (;;) {
         unsigned sync_words;
@@ -1162,7 +989,7 @@ locate_mlp_parameters(AOB_Reader* aob_reader,
         br_pos_t* mlp_frame_start;
 
         if (mlp_data->size(mlp_data) < 8) {
-            /*extend queue with additional packets from aob_reader*/
+            /*extend queue with additional packets from packet_reader*/
             /*FIXME*/
             fprintf(stderr, "*** FIXME : data queue exhausted\n");
             abort();

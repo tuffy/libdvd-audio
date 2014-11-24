@@ -11,6 +11,7 @@ mini-gmp.o
 
 DVDA_OBJS = dvd-audio.o \
 aob.o \
+packet.o \
 audio_ts.o \
 pcm.o \
 mlp.o \
@@ -83,6 +84,9 @@ dvd-audio.o: include/dvd-audio.h src/dvd-audio.c
 
 aob.o: src/aob.h src/aob.c
 	$(CC) $(FLAGS) -c src/aob.c $(AOB_FLAGS)
+
+packet.o: src/packet.h src/packet.c
+	$(CC) $(FLAGS) -c src/packet.c
 
 audio_ts.o: src/audio_ts.h src/audio_ts.c
 	$(CC) $(FLAGS) -c src/audio_ts.c
