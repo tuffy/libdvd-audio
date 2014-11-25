@@ -29,6 +29,9 @@
 /*6 channels + 2 matrix channels*/
 #define MAX_MLP_CHANNELS 8
 
+#define a_reset(a)((a)->reset((a)))
+#define a_del(a)((a)->del((a)))
+
 /*******************************************************************
  *                      structure definitions                      *
  *******************************************************************/
@@ -318,21 +321,20 @@ dvda_close_mlpdecoder(MLPDecoder* decoder)
         unsigned c;
         unsigned m;
 
-        aa_int_del(decoder->substream[s].residuals);
-        a_int_del(decoder->substream[s].filtered);
+        a_del(decoder->substream[s].residuals);
+        a_del(decoder->substream[s].filtered);
 
         /*free matrix parameters*/
         for (m = 0; m < MAX_MLP_MATRICES; m++) {
-            a_int_del(
-                decoder->substream[s].parameters.matrix[m].bypassed_LSB);
+            a_del(decoder->substream[s].parameters.matrix[m].bypassed_LSB);
         }
 
         /*free channel parameters*/
         for (c = 0; c < MAX_MLP_CHANNELS; c++) {
-            a_int_del(decoder->substream[s].parameters.channel[c].FIR.coeff);
-            a_int_del(decoder->substream[s].parameters.channel[c].FIR.state);
-            a_int_del(decoder->substream[s].parameters.channel[c].IIR.coeff);
-            a_int_del(decoder->substream[s].parameters.channel[c].IIR.state);
+            a_del(decoder->substream[s].parameters.channel[c].FIR.coeff);
+            a_del(decoder->substream[s].parameters.channel[c].FIR.state);
+            a_del(decoder->substream[s].parameters.channel[c].IIR.coeff);
+            a_del(decoder->substream[s].parameters.channel[c].IIR.state);
         }
     }
 
@@ -443,8 +445,6 @@ decode_mlp_frame(MLPDecoder* decoder,
     unsigned pcm_frames[2];
     BitstreamReader *substream_reader;
 
-    /*FIXME - handle channel reordering here*/
-
     /*check for major sync*/
     if (read_major_sync(mlp_frame, &major_sync)) {
         if (decoder->major_sync_read) {
@@ -482,7 +482,7 @@ decode_mlp_frame(MLPDecoder* decoder,
 
     /*clear the bypassed LSB values in substream 0's matrix data*/
     for (m = 0; m < MAX_MLP_MATRICES; m++)
-        a_int_reset(substream0->parameters.matrix[m].bypassed_LSB);
+        a_reset(substream0->parameters.matrix[m].bypassed_LSB);
 
     /*decode substream 0 bytes to channel data*/
     if (!setjmp(*br_try(substream_reader))) {
@@ -553,7 +553,7 @@ decode_mlp_frame(MLPDecoder* decoder,
 
         /*clear the bypassed LSB values in substream 1's matrix data*/
         for (m = 0; m < MAX_MLP_MATRICES; m++)
-            a_int_reset(substream1->parameters.matrix[m].bypassed_LSB);
+            a_reset(substream1->parameters.matrix[m].bypassed_LSB);
 
         /*decode substream 1 bytes to channel data*/
         if (!setjmp(*br_try(substream_reader))) {
@@ -730,6 +730,14 @@ decode_substream(struct substream* substream,
             return pcm_frames_decoded;
         }
     } while (flag_set(substream_reader) == 0);
+
+    substream_reader->byte_align(substream_reader);
+    if (substream_reader->size(substream_reader) >= 4) {
+        if (substream_reader->read(substream_reader, 32) == 0xD234D234) {
+            fprintf(stderr, "*** %d Debug : end of stream indicated\n",
+                    __LINE__);
+        }
+    }
 
     return pcm_frames_decoded;
 }
@@ -944,7 +952,7 @@ decode_decoding_parameters(BitstreamReader* sr,
             } else if (header_present) {
                 /*default FIR filter parameters*/
                 p->channel[c].FIR.shift = 0;
-                a_int_reset(p->channel[c].FIR.coeff);
+                a_reset(p->channel[c].FIR.coeff);
             }
 
             if (p->flags[2] && flag_set(sr)) {
@@ -955,8 +963,8 @@ decode_decoding_parameters(BitstreamReader* sr,
             } else if (header_present) {
                 /*default IIR filter parameters*/
                 p->channel[c].IIR.shift = 0;
-                a_int_reset(p->channel[c].IIR.coeff);
-                a_int_reset(p->channel[c].IIR.state);
+                a_reset(p->channel[c].IIR.coeff);
+                a_reset(p->channel[c].IIR.state);
             }
 
             if (p->flags[1] && flag_set(sr)) {
@@ -975,10 +983,10 @@ decode_decoding_parameters(BitstreamReader* sr,
         } else if (header_present) {
             /*default channel parameters*/
             p->channel[c].FIR.shift = 0;
-            a_int_reset(p->channel[c].FIR.coeff);
+            a_reset(p->channel[c].FIR.coeff);
             p->channel[c].IIR.shift = 0;
-            a_int_reset(p->channel[c].IIR.coeff);
-            a_int_reset(p->channel[c].IIR.state);
+            a_reset(p->channel[c].IIR.coeff);
+            a_reset(p->channel[c].IIR.state);
             p->channel[c].huffman_offset = 0;
             p->channel[c].codebook = 0;
             p->channel[c].huffman_lsbs = 24;
