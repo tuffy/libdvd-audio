@@ -43,15 +43,18 @@ packet_reader_close(Packet_Reader *packet_reader);
 /*returns the next packet from a stream as a BitstreamReader
   of its data (not including the 48 bit header)
   along with the stream ID
+  and sector number
 
   returns NULL if there are no more packets to read*/
 BitstreamReader*
 packet_reader_next_packet(Packet_Reader *packet_reader,
-                          unsigned *stream_id);
+                          unsigned *stream_id,
+                          unsigned *sector);
 
 /*returns the next audio packet from the stream
   or NULL if there are no more packets to read*/
 BitstreamReader*
-packet_reader_next_audio_packet(Packet_Reader *packet_reader);
+packet_reader_next_audio_packet(Packet_Reader *packet_reader,
+                                unsigned *sector);
 
 #endif

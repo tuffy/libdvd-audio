@@ -59,29 +59,33 @@ packet_reader_close(Packet_Reader *packet_reader)
 
 BitstreamReader*
 packet_reader_next_packet(Packet_Reader *packet_reader,
-                          unsigned *stream_id)
+                          unsigned *stream_id,
+                          unsigned *sector)
 {
     BitstreamQueue *sector_data = packet_reader->sector_data;
     BitstreamReader *sector_reader = (BitstreamReader*)sector_data;
 
     if (sector_data->size(sector_data) == 0) {
-        uint8_t sector[SECTOR_SIZE];
+        uint8_t sector_buffer[SECTOR_SIZE];
         uint64_t pts;
         unsigned SCR_extension;
         unsigned bitrate;
 
         /*ran out of sector data, so read another sector (if possible)*/
-        if (aob_reader_read(packet_reader->aob_reader, sector)) {
+        if (aob_reader_read(packet_reader->aob_reader, sector_buffer)) {
             /*some error reading the next .AOB packet*/
             return NULL;
         }
 
         /*read pack header from sector data*/
-        sector_data->push(sector_data, SECTOR_SIZE, sector);
+        sector_data->push(sector_data, SECTOR_SIZE, sector_buffer);
         if (read_pack_header(sector_reader, &pts, &SCR_extension, &bitrate)) {
             return NULL;
         }
     }
+
+    /*current sector always 1 ahead of the one being read from*/
+    *sector = aob_reader_tell(packet_reader->aob_reader) - 1;
 
     /*read next packet from sector reader*/
     if (!setjmp(*br_try(sector_reader))) {
@@ -112,11 +116,13 @@ packet_reader_next_packet(Packet_Reader *packet_reader,
 }
 
 BitstreamReader*
-packet_reader_next_audio_packet(Packet_Reader *packet_reader)
+packet_reader_next_audio_packet(Packet_Reader *packet_reader,
+                                unsigned *sector)
 {
     unsigned stream_id = 0;
     BitstreamReader *packet = packet_reader_next_packet(packet_reader,
-                                                        &stream_id);
+                                                        &stream_id,
+                                                        sector);
     if (!packet) {
         return NULL;
     }
@@ -124,7 +130,7 @@ packet_reader_next_audio_packet(Packet_Reader *packet_reader)
         return packet;
     } else {
         packet->close(packet);
-        return packet_reader_next_audio_packet(packet_reader);
+        return packet_reader_next_audio_packet(packet_reader, sector);
     }
 }
 

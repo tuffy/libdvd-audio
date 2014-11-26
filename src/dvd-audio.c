@@ -101,6 +101,7 @@ struct PCM_Track_Reader {
 };
 
 struct MLP_Track_Reader {
+    unsigned last_sector;
     MLPDecoder* decoder;
 };
 
@@ -196,6 +197,7 @@ close_pcm_track_reader(DVDA_Track_Reader *reader);
 static DVDA_Track_Reader*
 open_mlp_track_reader(Packet_Reader* packet_reader,
                       BitstreamReader* audio_packet,
+                      unsigned last_sector,
                       unsigned pad_2_size);
 
 /*samples is a buffer to place decoded samples
@@ -566,6 +568,7 @@ dvda_open_track_reader(const DVDA_Track* track)
     DVDA_Track_Reader* track_reader;
     unsigned codec_id;
     unsigned pad_2_size;
+    unsigned sector;
 
     /*open an AOB reader for the given disc*/
     if ((aob_reader = aob_reader_open(track->disc.audio_ts,
@@ -584,7 +587,7 @@ dvda_open_track_reader(const DVDA_Track* track)
     packet_reader = packet_reader_open(aob_reader);
 
     /*get first audio packet from packet reader*/
-    audio_packet = packet_reader_next_audio_packet(packet_reader);
+    audio_packet = packet_reader_next_audio_packet(packet_reader, &sector);
 
     if (!audio_packet) {
         /*got to end of stream without hitting an audio packet*/
@@ -604,6 +607,7 @@ dvda_open_track_reader(const DVDA_Track* track)
     case MLP_CODEC_ID:
         track_reader = open_mlp_track_reader(packet_reader,
                                              audio_packet,
+                                             track->index.last_sector,
                                              pad_2_size);
         break;
     default:  /*unknown codec ID*/
@@ -731,24 +735,6 @@ dvda_read(DVDA_Track_Reader* reader,
             /*no more data in stream*/
             break;
         }
-        //BitstreamReader *audio_packet =
-        //    packet_reader_next_audio_packet(reader->packet_reader);
-        //if (audio_packet) {
-        //    const unsigned pcm_frames_read =
-        //        reader->decode_packet(reader,
-        //                              audio_packet,
-        //                              channel_data);
-
-        //    audio_packet->close(audio_packet);
-
-        //    if (!pcm_frames_read) {
-        //        /*no more data from next audio packet*/
-        //        break;
-        //    }
-        //} else {
-        //    /*no more audio packets in stream*/
-        //    break;
-        //}
     }
 
     amount_read = MIN(pcm_frames, channel_data->_[0]->len);
@@ -900,13 +886,14 @@ static unsigned
 decode_pcm_audio(DVDA_Track_Reader* self, aa_int* samples)
 {
     BitstreamReader* packet;
+    unsigned sector;
 
     if (!self->reader.pcm.remaining_pcm_frames) {
         /*no more data to output*/
         return 0;
     }
 
-    packet = packet_reader_next_audio_packet(self->packet_reader);
+    packet = packet_reader_next_audio_packet(self->packet_reader, &sector);
 
     if (!packet) {
         /*no more packets in stream*/
@@ -976,6 +963,7 @@ close_pcm_track_reader(DVDA_Track_Reader *reader)
 static DVDA_Track_Reader*
 open_mlp_track_reader(Packet_Reader* packet_reader,
                       BitstreamReader* audio_packet,
+                      unsigned last_sector,
                       unsigned pad_2_size)
 {
     unsigned channel_count;
@@ -1003,6 +991,8 @@ open_mlp_track_reader(Packet_Reader* packet_reader,
     channel_count =
         unpack_channel_count(track_reader->parameters.channel_assignment);
 
+    track_reader->reader.mlp.last_sector = last_sector;
+    fprintf(stderr, "*** %d Debug: last sector %u\n", __LINE__, last_sector);
     track_reader->reader.mlp.decoder =
         dvda_open_mlpdecoder(&(track_reader->parameters));
 
@@ -1031,10 +1021,20 @@ static unsigned
 decode_mlp_audio(DVDA_Track_Reader* self, aa_int* samples)
 {
     BitstreamReader* packet;
+    unsigned sector;
 
-    packet = packet_reader_next_audio_packet(self->packet_reader);
+    packet = packet_reader_next_audio_packet(self->packet_reader, &sector);
 
     if (!packet) {
+        return 0;
+    }
+
+    /*FIXME - if the current sector is within the track's
+      range of sectors, process it*/
+
+    if (sector > self->reader.mlp.last_sector) {
+        /*FIXME - otherwise, only process until the next major sync*/
+        packet->close(packet);
         return 0;
     }
 
@@ -1042,11 +1042,6 @@ decode_mlp_audio(DVDA_Track_Reader* self, aa_int* samples)
         unsigned codec_id;
         unsigned pad_2_size;
         unsigned pcm_frames_read;
-
-        /*FIXME - if the current sector is within the track's
-          range of sectors, process it*/
-
-        /*FIXME - otherwise, only process until the next major sync*/
 
         read_audio_packet_header(packet, &codec_id, &pad_2_size);
 
@@ -1117,8 +1112,9 @@ locate_mlp_parameters(Packet_Reader* packet_reader,
 
         if (mlp_data->size(mlp_data) < 8) {
             /*extend queue with additional packets from packet_reader*/
+            unsigned sector;
             BitstreamReader *audio_packet =
-                packet_reader_next_audio_packet(packet_reader);
+                packet_reader_next_audio_packet(packet_reader, &sector);
             unsigned codec_id;
             unsigned pad_2_size;
 
@@ -1126,6 +1122,7 @@ locate_mlp_parameters(Packet_Reader* packet_reader,
                 /*FIXME - end of stream hit, return error*/
                 abort();
             }
+
             read_audio_packet_header(audio_packet, &codec_id, &pad_2_size);
             /*FIXME - ensure codec is MLP*/
 
