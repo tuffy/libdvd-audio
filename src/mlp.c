@@ -463,9 +463,6 @@ decode_mlp_frame(MLPDecoder* decoder,
     for (s = 0; s < decoder->major_sync.substream_count; s++) {
         read_substream_info(mlp_frame, &(decoder->substream[s].info));
         if (decoder->substream[s].info.extraword_present) {
-            fprintf(stderr,
-                    "*** %d Debug : extra word present in substream %u\n",
-                    __LINE__, s);
             mlp_frame->skip(mlp_frame, 16);
         }
     }
