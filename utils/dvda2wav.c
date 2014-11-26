@@ -291,6 +291,7 @@ extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path)
     unsigned frames_read;
     bw_pos_t *file_start;
     unsigned total_pcm_frames = 0;
+    bw_write_signed_f write_signed;
 
     if ((output_file = fopen(output_path, "wb")) == NULL) {
         fprintf(stderr, "*** Error: unable to open \"%s\" for writing\n",
@@ -305,6 +306,7 @@ extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path)
            dvda_bits_per_sample(track_reader));
 
     output = bw_open(output_file, BS_LITTLE_ENDIAN);
+    write_signed = output->write_signed;
 
     /*write initial RIFF WAVE header*/
     file_start = output->getpos(output);
@@ -322,7 +324,7 @@ extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path)
                                     buffer)) > 0) {
         unsigned i;
         for (i = 0; i < frames_read * channel_count; i++) {
-            output->write_signed(output, bits_per_sample, buffer[i]);
+            write_signed(output, bits_per_sample, buffer[i]);
         }
         total_pcm_frames += frames_read;
     }

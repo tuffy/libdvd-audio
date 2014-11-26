@@ -142,6 +142,7 @@ dvda_pcmdecoder_decode_packet(PCMDecoder* decoder,
     const unsigned bytes_per_sample = decoder->bytes_per_sample;
     const unsigned chunk_size = decoder->chunk_size;
     unsigned processed_frames = 0;
+    br_read_f read = packet_reader->read;
 
     while (packet_reader->size(packet_reader) >= chunk_size) {
         uint8_t unswapped[36];
@@ -151,7 +152,7 @@ dvda_pcmdecoder_decode_packet(PCMDecoder* decoder,
         /*swap read bytes to proper order*/
         for (i = 0; i < chunk_size; i++) {
             unswapped[AOB_BYTE_SWAP[bps][channels - 1][i]] =
-                (uint8_t)(packet_reader->read(packet_reader, 8));
+                (uint8_t)(read(packet_reader, 8));
         }
 
         /*decode bytes to PCM ints and place them in proper channels*/

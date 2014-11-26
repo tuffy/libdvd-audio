@@ -94,20 +94,37 @@ struct DVDA_Track_s {
     DVDA_Index index;
 };
 
+struct PCM_Track_Reader {
+    uint64_t total_pcm_frames;
+    uint64_t remaining_pcm_frames;
+    PCMDecoder* decoder;
+};
+
+struct MLP_Track_Reader {
+    MLPDecoder* decoder;
+};
+
 struct DVDA_Track_Reader_s {
     Packet_Reader* packet_reader;
 
     dvda_codec_t codec;
+
     struct stream_parameters parameters;
-    uint64_t total_pcm_frames;
-    uint64_t remaining_pcm_frames;
 
     union {
-        PCMDecoder* pcm;
-        MLPDecoder* mlp;
-    } decoder;
+        struct PCM_Track_Reader pcm;
+        struct MLP_Track_Reader mlp;
+    } reader;
 
     aa_int* channel_data;
+
+    unsigned
+    (*decode_packet)(struct DVDA_Track_Reader_s* self,
+                     BitstreamReader* packet,
+                     aa_int* samples);
+
+    void
+    (*close)(struct DVDA_Track_Reader_s* self);
 };
 
 /*******************************************************************
@@ -135,29 +152,78 @@ disc_path_free(struct disc_path *path);
 static unsigned
 get_titleset_count(const char *audio_ts_ifo);
 
+
+/******** PCM-based reader and methods ********/
+
+/*packet reader is the stream of additional packets
+
+  audio_packet is all the data in the packet after
+  the pad 2 size value once the stream has been probed
+
+  PTS length is the total length of the track from the index
+
+  pad 2 size is pulled from the packet header
+
+  returns a completed reader which must be closed
+  with dvda_close_track_reader()*/
 static DVDA_Track_Reader*
 open_pcm_track_reader(Packet_Reader* packet_reader,
                       BitstreamReader* audio_packet,
                       unsigned pts_length,
                       unsigned pad_2_size);
 
+/*packet is all the data after the 48-bit packet header
+
+  samples is a buffer to place decoded samples
+
+  returns the aount of PCM frames read*/
+static unsigned
+decode_pcm_audio_packet(DVDA_Track_Reader* self,
+                        BitstreamReader* packet,
+                        aa_int* samples);
+
+static void
+close_pcm_track_reader(DVDA_Track_Reader *reader);
+
+
+/******** MLP-based reader and methods ********/
+
+/*packet reader is the stream of additional packets
+
+  audio_packet is all the data in the packet after
+  the pad 2 size value once the stream has been probed
+
+  PTS length is the total length of the track from the index
+
+  pad 2 size is pulled from the packet header
+
+  returns a completed reader which must be closed
+  with dvda_close_track_reader()*/
 static DVDA_Track_Reader*
 open_mlp_track_reader(Packet_Reader* packet_reader,
                       BitstreamReader* audio_packet,
                       unsigned pts_length,
                       unsigned pad_2_size);
 
+/*packet is all the data after the 48-bit packet header
+
+  samples is a buffer to place decoded samples
+
+  returns the aount of PCM frames read*/
+static unsigned
+decode_mlp_audio_packet(DVDA_Track_Reader* self,
+                        BitstreamReader* packet,
+                        aa_int* samples);
+
+static void
+close_mlp_track_reader(DVDA_Track_Reader *reader);
+
+
 /*reads the header of an audio packet following the 48 bit packet header*/
 static void
 read_audio_packet_header(BitstreamReader* packet_reader,
                          unsigned *codec_id,
                          unsigned *pad_2_size);
-
-/*returns the aount of PCM frames read*/
-static unsigned
-decode_audio_packet(DVDA_Track_Reader* reader,
-                    BitstreamReader* packet_reader,
-                    aa_int* samples);
 
 /*given an AOB reader and packet data (not including header or pad 2 block)
   locates the first set of stream parameters
@@ -566,17 +632,7 @@ dvda_open_track_reader(const DVDA_Track* track)
 void
 dvda_close_track_reader(DVDA_Track_Reader* reader)
 {
-    packet_reader_close(reader->packet_reader);
-    switch (reader->codec) {
-    case DVDA_PCM:
-        dvda_close_pcmdecoder(reader->decoder.pcm);
-        break;
-    case DVDA_MLP:
-        dvda_close_mlpdecoder(reader->decoder.mlp);
-        break;
-    }
-    reader->channel_data->del(reader->channel_data);
-    free(reader);
+    reader->close(reader);
 }
 
 dvda_codec_t
@@ -670,23 +726,22 @@ dvda_read(DVDA_Track_Reader* reader,
           unsigned pcm_frames,
           int buffer[])
 {
-    const unsigned to_read = MIN(reader->remaining_pcm_frames, pcm_frames);
     const unsigned channel_count = dvda_channel_count(reader);
     aa_int* channel_data = reader->channel_data;
     unsigned amount_read;
     unsigned c;
 
-    if (!to_read) {
+    if (!pcm_frames) {
         return 0;
     }
 
     /*populate per-channel buffer with samples as needed*/
-    while (channel_data->_[0]->len < to_read) {
+    while (channel_data->_[0]->len < pcm_frames) {
         BitstreamReader *audio_packet =
             packet_reader_next_audio_packet(reader->packet_reader);
         if (audio_packet) {
             const unsigned pcm_frames_read =
-                decode_audio_packet(reader, audio_packet, channel_data);
+                reader->decode_packet(reader, audio_packet, channel_data);
 
             audio_packet->close(audio_packet);
 
@@ -700,7 +755,7 @@ dvda_read(DVDA_Track_Reader* reader,
         }
     }
 
-    amount_read = MIN(to_read, channel_data->_[0]->len);
+    amount_read = MIN(pcm_frames, channel_data->_[0]->len);
 
     /*transfer contents of per-channel buffer to output buffer*/
     for (c = 0; c < channel_count; c++) {
@@ -714,12 +769,6 @@ dvda_read(DVDA_Track_Reader* reader,
 
         /*remove output buffer contents from per-channel buffer*/
         channel->de_head(channel, amount_read, channel);
-    }
-
-    if (amount_read == to_read) {
-        reader->remaining_pcm_frames -= amount_read;
-    } else {
-        reader->remaining_pcm_frames = 0;
     }
 
     return amount_read;
@@ -797,6 +846,8 @@ open_pcm_track_reader(Packet_Reader* packet_reader,
     unsigned channel_count;
     unsigned c;
     double pts_length_d = pts_length;
+    uint64_t total_pcm_frames;
+    unsigned pcm_frames_read;
 
     DVDA_Track_Reader* track_reader = malloc(sizeof(DVDA_Track_Reader));
     track_reader->packet_reader = packet_reader;
@@ -812,13 +863,16 @@ open_pcm_track_reader(Packet_Reader* packet_reader,
     pts_length_d *= unpack_sample_rate(track_reader->parameters.group_0_rate);
     pts_length_d /= PTS_PER_SECOND;
 
-    track_reader->total_pcm_frames = lround(pts_length_d);
-    track_reader->remaining_pcm_frames = track_reader->total_pcm_frames;
+    total_pcm_frames = lround(pts_length_d);
+
+    track_reader->reader.pcm.total_pcm_frames =
+        track_reader->reader.pcm.remaining_pcm_frames =
+        total_pcm_frames;
 
     channel_count =
         unpack_channel_count(track_reader->parameters.channel_assignment);
 
-    track_reader->decoder.pcm = dvda_open_pcmdecoder(
+    track_reader->reader.pcm.decoder = dvda_open_pcmdecoder(
         unpack_bits_per_sample(track_reader->parameters.group_0_bps),
         channel_count);
 
@@ -830,12 +884,86 @@ open_pcm_track_reader(Packet_Reader* packet_reader,
 
     /*decode remaining bytes in packet to buffer*/
     audio_packet->skip_bytes(audio_packet, pad_2_size - 9);
-    dvda_pcmdecoder_decode_packet(track_reader->decoder.pcm,
-                                  audio_packet,
-                                  track_reader->channel_data);
+
+    pcm_frames_read =
+        dvda_pcmdecoder_decode_packet(track_reader->reader.pcm.decoder,
+                                      audio_packet,
+                                      track_reader->channel_data);
+
+    track_reader->reader.pcm.remaining_pcm_frames -=
+        MIN(pcm_frames_read, total_pcm_frames);
+
+    /*setup reader's methods*/
+    track_reader->decode_packet = decode_pcm_audio_packet;
+    track_reader->close = close_pcm_track_reader;
 
     return track_reader;
 }
+
+static unsigned
+decode_pcm_audio_packet(DVDA_Track_Reader* self,
+                        BitstreamReader* packet,
+                        aa_int* samples)
+{
+    if (!self->reader.pcm.remaining_pcm_frames) {
+        return 0;
+    }
+
+    if (!setjmp(*br_try(packet))) {
+        unsigned codec_id;
+        unsigned pad_2_size;
+        struct stream_parameters parameters;
+        unsigned pcm_frames_read;
+
+        read_audio_packet_header(packet, &codec_id, &pad_2_size);
+
+        if (codec_id != PCM_CODEC_ID) {
+            /*codec mismatch in stream*/
+            br_etry(packet);
+            return 0;
+        }
+
+        dvda_pcmdecoder_decode_params(packet, &parameters);
+
+        if (!dvda_params_equal(&self->parameters, &parameters)) {
+            /*stream parameters mismatch*/
+            br_etry(packet);
+            return 0;
+        }
+
+        packet->skip_bytes(packet, pad_2_size - 9);
+
+        pcm_frames_read =
+            dvda_pcmdecoder_decode_packet(self->reader.pcm.decoder,
+                                          packet,
+                                          samples);
+
+        br_etry(packet);
+
+        /*FIXME - handle the case of PCM frames not falling
+          on packet boundaries?*/
+        self->reader.pcm.remaining_pcm_frames -=
+            MIN(pcm_frames_read,
+                self->reader.pcm.remaining_pcm_frames);
+
+        /*return all samples*/
+        return pcm_frames_read;
+    } else {
+        /*some I/O error reading packet*/
+        br_etry(packet);
+        return 0;
+    }
+}
+
+static void
+close_pcm_track_reader(DVDA_Track_Reader *reader)
+{
+    packet_reader_close(reader->packet_reader);
+    dvda_close_pcmdecoder(reader->reader.pcm.decoder);
+    reader->channel_data->del(reader->channel_data);
+    free(reader);
+}
+
 
 static DVDA_Track_Reader*
 open_mlp_track_reader(Packet_Reader* packet_reader,
@@ -843,55 +971,66 @@ open_mlp_track_reader(Packet_Reader* packet_reader,
                       unsigned pts_length,
                       unsigned pad_2_size)
 {
-    unsigned channel_count;
-    unsigned c;
-    double pts_length_d = pts_length;
-    BitstreamQueue* mlp_data;
+    /*FIXME*/
+    return NULL;
+    //unsigned channel_count;
+    //unsigned c;
+    //double pts_length_d = pts_length;
+    //BitstreamQueue* mlp_data;
 
-    DVDA_Track_Reader* track_reader = malloc(sizeof(DVDA_Track_Reader));
-    track_reader->packet_reader = packet_reader;
+    //DVDA_Track_Reader* track_reader = malloc(sizeof(DVDA_Track_Reader));
+    //track_reader->packet_reader = packet_reader;
 
-    track_reader->codec = DVDA_MLP;
+    //track_reader->codec = DVDA_MLP;
 
-    /*FIXME - check for I/O errors?*/
+    ///*FIXME - check for I/O errors?*/
 
-    /*skip initial padding*/
-    audio_packet->skip_bytes(audio_packet, pad_2_size);
+    ///*skip initial padding*/
+    //audio_packet->skip_bytes(audio_packet, pad_2_size);
 
-    mlp_data = br_open_queue(BS_BIG_ENDIAN);
+    //mlp_data = br_open_queue(BS_BIG_ENDIAN);
 
-    /*FIXME - save offset somewhere?*/
-    locate_mlp_parameters(packet_reader,
-                          audio_packet,
-                          &track_reader->parameters,
-                          mlp_data);
+    ///*FIXME - save offset somewhere?*/
+    //locate_mlp_parameters(packet_reader,
+    //                      audio_packet,
+    //                      &track_reader->parameters,
+    //                      mlp_data);
 
-    pts_length_d *= unpack_sample_rate(track_reader->parameters.group_0_rate);
-    pts_length_d /= PTS_PER_SECOND;
+    //pts_length_d *= unpack_sample_rate(track_reader->parameters.group_0_rate);
+    //pts_length_d /= PTS_PER_SECOND;
 
-    track_reader->total_pcm_frames = lround(pts_length_d);
-    track_reader->remaining_pcm_frames = track_reader->total_pcm_frames;
+    //track_reader->total_pcm_frames = lround(pts_length_d);
+    //track_reader->remaining_pcm_frames = track_reader->total_pcm_frames;
 
-    channel_count =
-        unpack_channel_count(track_reader->parameters.channel_assignment);
+    //channel_count =
+    //    unpack_channel_count(track_reader->parameters.channel_assignment);
 
-    track_reader->decoder.mlp = dvda_open_mlpdecoder(
-        &(track_reader->parameters));
+    //track_reader->decoder.mlp = dvda_open_mlpdecoder(
+    //    &(track_reader->parameters));
 
-    /*setup initial channels*/
-    track_reader->channel_data = aa_int_new();
-    for (c = 0; c < channel_count; c++) {
-        (void)track_reader->channel_data->append(track_reader->channel_data);
-    }
+    ///*setup initial channels*/
+    //track_reader->channel_data = aa_int_new();
+    //for (c = 0; c < channel_count; c++) {
+    //    (void)track_reader->channel_data->append(track_reader->channel_data);
+    //}
 
-    /*decode remaining MLP frames in packet to buffer*/
-    dvda_mlpdecoder_decode_packet(track_reader->decoder.mlp,
-                                  (BitstreamReader*)mlp_data,
-                                  track_reader->channel_data);
+    ///*decode remaining MLP frames in packet to buffer*/
+    //dvda_mlpdecoder_decode_packet(track_reader->decoder.mlp,
+    //                              (BitstreamReader*)mlp_data,
+    //                              track_reader->channel_data);
 
-    mlp_data->close(mlp_data);
+    //mlp_data->close(mlp_data);
 
-    return track_reader;
+    //return track_reader;
+}
+
+static void
+close_mlp_track_reader(DVDA_Track_Reader *reader)
+{
+    packet_reader_close(reader->packet_reader);
+    dvda_close_mlpdecoder(reader->reader.mlp.decoder);
+    reader->channel_data->del(reader->channel_data);
+    free(reader);
 }
 
 static void
@@ -906,65 +1045,65 @@ read_audio_packet_header(BitstreamReader* packet_reader,
     packet_reader->parse(packet_reader, "8u 8p 8p 8u", codec_id, pad_2_size);
 }
 
-static unsigned
-decode_audio_packet(DVDA_Track_Reader* reader,
-                    BitstreamReader* packet_reader,
-                    aa_int* samples)
-{
-    if (!setjmp(*br_try(packet_reader))) {
-        unsigned pcm_frames_read = 0;
-        unsigned codec_id;
-        unsigned pad_2_size;
-
-        read_audio_packet_header(packet_reader,
-                                 &codec_id,
-                                 &pad_2_size);
-
-        /*FIXME - ensure audio codec is the same as the reader's codec*/
-
-        switch (codec_id) {
-        case PCM_CODEC_ID:
-            {
-                struct stream_parameters parameters;
-
-                dvda_pcmdecoder_decode_params(packet_reader,
-                                              &parameters);
-
-                if (!dvda_params_equal(&reader->parameters,
-                                       &parameters)) {
-                    /*some stream parameters mismatch*/
-                    br_abort(packet_reader);
-                }
-
-                packet_reader->skip_bytes(packet_reader,
-                                          pad_2_size - 9);
-
-                pcm_frames_read =
-                    dvda_pcmdecoder_decode_packet(reader->decoder.pcm,
-                                                  packet_reader,
-                                                  samples);
-            }
-            break;
-        case MLP_CODEC_ID:
-            packet_reader->skip_bytes(packet_reader, pad_2_size);
-            pcm_frames_read =
-                dvda_mlpdecoder_decode_packet(reader->decoder.mlp,
-                                              packet_reader,
-                                              samples);
-            break;
-        default:
-            /*unknown audio codec, so ignore packet*/
-            break;
-        }
-
-        br_etry(packet_reader);
-        return pcm_frames_read;
-    } else {
-        /*some I/O error reading from packet*/
-        br_etry(packet_reader);
-        return 0;
-    }
-}
+//static unsigned
+//decode_audio_packet(DVDA_Track_Reader* reader,
+//                    BitstreamReader* packet_reader,
+//                    aa_int* samples)
+//{
+//    if (!setjmp(*br_try(packet_reader))) {
+//        unsigned pcm_frames_read = 0;
+//        unsigned codec_id;
+//        unsigned pad_2_size;
+//
+//        read_audio_packet_header(packet_reader,
+//                                 &codec_id,
+//                                 &pad_2_size);
+//
+//        /*FIXME - ensure audio codec is the same as the reader's codec*/
+//
+//        switch (codec_id) {
+//        case PCM_CODEC_ID:
+//            {
+//                struct stream_parameters parameters;
+//
+//                dvda_pcmdecoder_decode_params(packet_reader,
+//                                              &parameters);
+//
+//                if (!dvda_params_equal(&reader->parameters,
+//                                       &parameters)) {
+//                    /*some stream parameters mismatch*/
+//                    br_abort(packet_reader);
+//                }
+//
+//                packet_reader->skip_bytes(packet_reader,
+//                                          pad_2_size - 9);
+//
+//                pcm_frames_read =
+//                    dvda_pcmdecoder_decode_packet(reader->reader.pcm.decoder,
+//                                                  packet_reader,
+//                                                  samples);
+//            }
+//            break;
+//        case MLP_CODEC_ID:
+//            packet_reader->skip_bytes(packet_reader, pad_2_size);
+//            pcm_frames_read =
+//                dvda_mlpdecoder_decode_packet(reader->reader.mlp.decoder,
+//                                              packet_reader,
+//                                              samples);
+//            break;
+//        default:
+//            /*unknown audio codec, so ignore packet*/
+//            break;
+//        }
+//
+//        br_etry(packet_reader);
+//        return pcm_frames_read;
+//    } else {
+//        /*some I/O error reading from packet*/
+//        br_etry(packet_reader);
+//        return 0;
+//    }
+//}
 
 static unsigned
 locate_mlp_parameters(Packet_Reader* packet_reader,

@@ -157,24 +157,24 @@ aob_reader_close(AOB_Reader *reader)
 int
 aob_reader_read(AOB_Reader *reader, uint8_t *sector_data)
 {
-    if (aob_read_sector(aob_current(reader), sector_data)) {
-        /*error reading sector in current AOB file, so try next AOB file*/
-        reader->current_aob++;
-        if (reader->current_aob < reader->total_aobs) {
+    if (reader->current_aob < reader->total_aobs) {
+        if (aob_read_sector(aob_current(reader), sector_data)) {
+            /*error reading sector in current AOB, so try next*/
+            reader->current_aob++;
             return aob_reader_read(reader, sector_data);
         } else {
-            /*no more data to read*/
-            return 1;
-        }
-    } else {
-        /*sector read OK*/
+            /*sector read OK*/
+
 #ifdef HAS_CPPM
-        if (reader->perform_decoding) {
-            cppm_decrypt_block(&reader->cppm_decoder, sector_data, 1);
-        }
+            if (reader->perform_decoding) {
+                cppm_decrypt_block(&reader->cppm_decoder, sector_data, 1);
+            }
 #endif
 
         return 0;
+        }
+    } else {
+        return 1;
     }
 }
 
