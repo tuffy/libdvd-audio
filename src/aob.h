@@ -50,4 +50,8 @@ aob_reader_read(AOB_Reader *reader, uint8_t *sector_data);
 int
 aob_reader_seek(AOB_Reader *reader, unsigned sector_number);
 
+/*returns the current sector number*/
+unsigned
+aob_reader_tell(AOB_Reader *reader);
+
 #endif

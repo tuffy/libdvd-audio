@@ -862,7 +862,7 @@ TYPE##_cross_split(const TYPE *self, unsigned count,           \
 static void                                                    \
 TYPE##_reverse(TYPE *self);                                    \
                                                                \
-static void                                                           \
+static void                                                    \
 TYPE##_print(const TYPE *self, FILE* output);                  \
                                                                \
 struct TYPE##_s* TYPE##_new(void)                              \

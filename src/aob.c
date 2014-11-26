@@ -198,6 +198,20 @@ aob_reader_seek(AOB_Reader *reader, unsigned sector_number)
     return 1;
 }
 
+unsigned
+aob_reader_tell(AOB_Reader *reader)
+{
+    unsigned i;
+    unsigned current_sector = 0;
+
+    for (i = 0; i < reader->current_aob; i++) {
+        current_sector += reader->AOB[i].total_sectors;
+    }
+
+    current_sector += reader->AOB[reader->current_aob].current_sector;
+    return current_sector;
+}
+
 /*******************************************************************
  *                  private function implementations               *
  *******************************************************************/
