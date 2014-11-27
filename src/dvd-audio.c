@@ -110,6 +110,8 @@ struct DVDA_Track_Reader_s {
 
     dvda_codec_t codec;
 
+    int stream_finished;
+
     struct stream_parameters parameters;
 
     union {
@@ -216,7 +218,16 @@ read_audio_packet_header(BitstreamReader* packet_reader,
                          unsigned *codec_id,
                          unsigned *pad_2_size);
 
-/*given an AOB reader and packet data (not including header or pad 2 block)
+/*given a buffer of MLP data,
+  advances the stream to the start of the next MLP frame
+  by finding its major sync and increments bytes_skipped by the number
+  of bytes advanced
+
+  returns 1 if a major sync is found, 0 if not*/
+static int
+find_major_sync(BitstreamReader* mlp_data, unsigned *bytes_skipped);
+
+/*given a packet reader and packet data (not including header or pad 2 block)
   locates the first set of stream parameters
   and dumps the remaining MLP data in mlp_data
   for later processing
@@ -227,6 +238,15 @@ locate_mlp_parameters(Packet_Reader* packet_reader,
                       BitstreamReader* packet_data,
                       struct stream_parameters* parameters,
                       BitstreamQueue* mlp_data);
+
+/*given a packet reader and initial packet data
+  (not including 48 bit header)
+  enqueues all MLP data on the stream to mlp_data
+  and returns the amount of data queued*/
+static unsigned
+mlp_data_to_major_sync(Packet_Reader* packet_reader,
+                       BitstreamReader* packet_data,
+                       BitstreamQueue* mlp_data);
 
 /*given a 4 bit packed field,
   returns the bits-per-sample which is either 16, 20 or 24*/
@@ -728,12 +748,15 @@ dvda_read(DVDA_Track_Reader* reader,
     }
 
     /*populate per-channel buffer with samples as needed*/
-    while (channel_data->_[0]->len < pcm_frames) {
-        const unsigned pcm_frames_read =
-            reader->decode(reader, channel_data);
-        if (!pcm_frames_read) {
-            /*no more data in stream*/
-            break;
+    if (!reader->stream_finished) {
+        while (channel_data->_[0]->len < pcm_frames) {
+            const unsigned pcm_frames_read =
+                reader->decode(reader, channel_data);
+            if (!pcm_frames_read) {
+                /*no more data in stream*/
+                reader->stream_finished = 1;
+                break;
+            }
         }
     }
 
@@ -840,6 +863,7 @@ open_pcm_track_reader(Packet_Reader* packet_reader,
     /*it appears PCM data always starts at the beginning of the
       track's first sector and PCM data doesn't cross packet boundaries*/
     track_reader->codec = DVDA_PCM;
+    track_reader->stream_finished = 0;
     dvda_pcmdecoder_decode_params(audio_packet, &(track_reader->parameters));
 
     pts_length_d *= unpack_sample_rate(track_reader->parameters.group_0_rate);
@@ -974,6 +998,7 @@ open_mlp_track_reader(Packet_Reader* packet_reader,
     track_reader->packet_reader = packet_reader;
 
     track_reader->codec = DVDA_MLP;
+    track_reader->stream_finished = 0;
 
     /*FIXME - check for I/O errors?*/
 
@@ -992,7 +1017,6 @@ open_mlp_track_reader(Packet_Reader* packet_reader,
         unpack_channel_count(track_reader->parameters.channel_assignment);
 
     track_reader->reader.mlp.last_sector = last_sector;
-    fprintf(stderr, "*** %d Debug: last sector %u\n", __LINE__, last_sector);
     track_reader->reader.mlp.decoder =
         dvda_open_mlpdecoder(&(track_reader->parameters));
 
@@ -1023,19 +1047,43 @@ decode_mlp_audio(DVDA_Track_Reader* self, aa_int* samples)
     BitstreamReader* packet;
     unsigned sector;
 
+    if (self->stream_finished) {
+        return 0;
+    }
+
     packet = packet_reader_next_audio_packet(self->packet_reader, &sector);
 
     if (!packet) {
         return 0;
     }
 
-    /*FIXME - if the current sector is within the track's
-      range of sectors, process it*/
-
+    /*if the current sector is outside the track's range of sectors*/
+    /*process only until the next major sync*/
     if (sector > self->reader.mlp.last_sector) {
-        /*FIXME - otherwise, only process until the next major sync*/
+        BitstreamQueue* mlp_data = br_open_queue(BS_BIG_ENDIAN);
+        unsigned extra_bytes = mlp_data_to_major_sync(self->packet_reader,
+                                                      packet,
+                                                      mlp_data);
+        unsigned pcm_frames_read;
+
         packet->close(packet);
-        return 0;
+
+        if (extra_bytes) {
+            assert(extra_bytes == mlp_data->size(mlp_data));
+
+            pcm_frames_read =
+                dvda_mlpdecoder_decode_packet(self->reader.mlp.decoder,
+                                              (BitstreamReader*)mlp_data,
+                                              samples);
+        } else {
+            pcm_frames_read = 0;
+        }
+
+        mlp_data->close(mlp_data);
+
+        self->stream_finished = 1;
+
+        return pcm_frames_read;
     }
 
     if (!setjmp(*br_try(packet))) {
@@ -1090,6 +1138,46 @@ read_audio_packet_header(BitstreamReader* packet_reader,
     packet_reader->parse(packet_reader, "16p 8u", &pad_1_size);
     packet_reader->skip_bytes(packet_reader, pad_1_size);
     packet_reader->parse(packet_reader, "8u 8p 8p 8u", codec_id, pad_2_size);
+}
+
+static int
+find_major_sync(BitstreamReader* mlp_data, unsigned *bytes_skipped)
+{
+    for (;;) {
+        unsigned sync_words;
+        unsigned stream_type;
+        br_pos_t* mlp_frame_start;
+
+        if (mlp_data->size(mlp_data) < 8) {
+            /*not enough data to contain a major sync*/
+            return 0;
+        }
+
+        /*look for major sync*/
+        mlp_frame_start = mlp_data->getpos(mlp_data);
+
+        mlp_data->parse(mlp_data, "4p 12p 16p 24u 8u",
+                        &sync_words, &stream_type);
+
+        /*if major sync is found*/
+        if ((sync_words == 0xF8726F) && (stream_type == 0xBB)) {
+            /*rewind to start and frame and return success*/
+            mlp_data->setpos(mlp_data, mlp_frame_start);
+            mlp_frame_start->del(mlp_frame_start);
+
+            return 1;
+        } else {  /*if major sync is not found*/
+            /*rewind to start of frame*/
+            mlp_data->setpos(mlp_data, mlp_frame_start);
+            mlp_frame_start->del(mlp_frame_start);
+
+            /*advance 1 byte*/
+            mlp_data->skip(mlp_data, 8);
+
+            /*and continue looking*/
+            *bytes_skipped += 1;
+        }
+    }
 }
 
 static unsigned
@@ -1165,6 +1253,82 @@ locate_mlp_parameters(Packet_Reader* packet_reader,
             bytes_skipped += 1;
         }
     }
+}
+
+static unsigned
+mlp_data_to_major_sync(Packet_Reader* packet_reader,
+                       BitstreamReader* packet_data,
+                       BitstreamQueue* mlp_data)
+{
+    BitstreamQueue* packet_queue = br_open_queue(BS_BIG_ENDIAN);
+    br_pos_t* queue_start =
+        packet_queue->getpos((BitstreamReader*)packet_queue);
+    unsigned bytes_queued = 0;
+
+    unsigned codec_id;
+    unsigned pad_2_size;
+
+    /*FIXME - handle read errors*/
+
+    /*populate queue with initial packet data*/
+    read_audio_packet_header(packet_data, &codec_id, &pad_2_size);
+
+    if (codec_id != MLP_CODEC_ID) {
+        /*codec mismatch in stream*/
+        packet_queue->close(packet_queue);
+        queue_start->del(queue_start);
+        return 0;
+    }
+
+    packet_data->skip_bytes(packet_data, pad_2_size);
+
+    packet_data->enqueue(packet_data,
+                         packet_data->size(packet_data),
+                         packet_queue);
+
+    /*while no major sync is found*/
+    while (!find_major_sync((BitstreamReader*)packet_queue, &bytes_queued)) {
+        /*continue populated queue with packet data*/
+        unsigned sector;
+        BitstreamReader* next_packet =
+            packet_reader_next_audio_packet(packet_reader, &sector);
+        if (!next_packet) {
+            /*ran out of additional packets*/
+            fprintf(stderr, "*** %d Debug: no more additional packets\n",
+                    __LINE__);
+            break;
+        }
+
+        read_audio_packet_header(next_packet, &codec_id, &pad_2_size);
+
+        if (codec_id != MLP_CODEC_ID) {
+            /*codec mismatch in stream*/
+            fprintf(stderr, "*** %d Debug: codec mismatch\n", __LINE__);
+            break;
+        }
+
+        next_packet->skip_bytes(next_packet, pad_2_size);
+
+        next_packet->enqueue(next_packet,
+                             next_packet->size(next_packet),
+                             packet_queue);
+
+        next_packet->close(next_packet);
+    }
+
+    /*finally, push only data from stream start to major sync to mlp_data*/
+    packet_queue->setpos((BitstreamReader*)packet_queue, queue_start);
+
+    queue_start->del(queue_start);
+
+    packet_queue->enqueue((BitstreamReader*)packet_queue,
+                          bytes_queued,
+                          mlp_data);
+
+    packet_queue->close(packet_queue);
+
+    /*then return amount actually queued*/
+    return bytes_queued;
 }
 
 static unsigned
