@@ -211,7 +211,6 @@ decode_mlp_audio(DVDA_Track_Reader* self, aa_int* samples);
 static void
 close_mlp_track_reader(DVDA_Track_Reader *reader);
 
-
 /*reads the header of an audio packet following the 48 bit packet header*/
 static void
 read_audio_packet_header(BitstreamReader* packet_reader,
@@ -226,6 +225,13 @@ read_audio_packet_header(BitstreamReader* packet_reader,
   returns 1 if a major sync is found, 0 if not*/
 static int
 find_major_sync(BitstreamReader* mlp_data, unsigned *bytes_skipped);
+
+/*reads the next audio packet of MLP data from packet_reader
+  and enqueues its data to mlp_data
+
+  returns 1 on success, 0 on failure*/
+static int
+enqueue_mlp_packet(Packet_Reader* packet_reader, BitstreamQueue* mlp_data);
 
 /*given a packet reader and packet data (not including header or pad 2 block)
   locates the first set of stream parameters
@@ -1143,15 +1149,10 @@ read_audio_packet_header(BitstreamReader* packet_reader,
 static int
 find_major_sync(BitstreamReader* mlp_data, unsigned *bytes_skipped)
 {
-    for (;;) {
+    while (mlp_data->size(mlp_data) >= 8) {
         unsigned sync_words;
         unsigned stream_type;
         br_pos_t* mlp_frame_start;
-
-        if (mlp_data->size(mlp_data) < 8) {
-            /*not enough data to contain a major sync*/
-            return 0;
-        }
 
         /*look for major sync*/
         mlp_frame_start = mlp_data->getpos(mlp_data);
@@ -1161,13 +1162,13 @@ find_major_sync(BitstreamReader* mlp_data, unsigned *bytes_skipped)
 
         /*if major sync is found*/
         if ((sync_words == 0xF8726F) && (stream_type == 0xBB)) {
-            /*rewind to start and frame and return success*/
+            /*rewind to start of frame and return success*/
             mlp_data->setpos(mlp_data, mlp_frame_start);
             mlp_frame_start->del(mlp_frame_start);
 
             return 1;
         } else {  /*if major sync is not found*/
-            /*rewind to start of frame*/
+            /*rewind to start of data*/
             mlp_data->setpos(mlp_data, mlp_frame_start);
             mlp_frame_start->del(mlp_frame_start);
 
@@ -1178,6 +1179,39 @@ find_major_sync(BitstreamReader* mlp_data, unsigned *bytes_skipped)
             *bytes_skipped += 1;
         }
     }
+
+    /*not enough data to contain a major sync*/
+    return 0;
+}
+
+static int
+enqueue_mlp_packet(Packet_Reader* packet_reader, BitstreamQueue* mlp_data)
+{
+    unsigned sector;
+    BitstreamReader* packet =
+        packet_reader_next_audio_packet(packet_reader, &sector);
+    unsigned codec_id;
+    unsigned pad_2_size;
+
+    if (!packet) {
+        return 0;
+    }
+
+    read_audio_packet_header(packet, &codec_id, &pad_2_size);
+
+    if (codec_id != MLP_CODEC_ID) {
+        packet->close(packet);
+        return enqueue_mlp_packet(packet_reader, mlp_data);
+    }
+
+    packet->skip_bytes(packet, pad_2_size);
+
+    packet->enqueue(packet,
+                    packet->size(packet),
+                    mlp_data);
+
+    packet->close(packet);
+    return 1;
 }
 
 static unsigned
@@ -1188,71 +1222,45 @@ locate_mlp_parameters(Packet_Reader* packet_reader,
 {
     unsigned bytes_skipped = 0;
     BitstreamReader* mlp_reader = (BitstreamReader*)mlp_data;
+    br_pos_t* mlp_frame_start;
 
     packet_data->enqueue(packet_data,
                          packet_data->size(packet_data),
                          mlp_data);
 
-    for (;;) {
-        unsigned sync_words;
-        unsigned stream_type;
-        br_pos_t* mlp_frame_start;
-
-        if (mlp_data->size(mlp_data) < 8) {
-            /*extend queue with additional packets from packet_reader*/
-            unsigned sector;
-            BitstreamReader *audio_packet =
-                packet_reader_next_audio_packet(packet_reader, &sector);
-            unsigned codec_id;
-            unsigned pad_2_size;
-
-            if (!audio_packet) {
-                /*FIXME - end of stream hit, return error*/
-                abort();
-            }
-
-            read_audio_packet_header(audio_packet, &codec_id, &pad_2_size);
-            /*FIXME - ensure codec is MLP*/
-
-            /*FIXME - check for read error*/
-            audio_packet->skip_bytes(audio_packet, pad_2_size);
-
-            audio_packet->enqueue(audio_packet,
-                                  audio_packet->size(audio_packet),
-                                  mlp_data);
-        }
-
-        /*look for major sync*/
-        mlp_frame_start = mlp_reader->getpos(mlp_reader);
-        mlp_reader->parse(mlp_reader, "4p 12p 16p 24u 8u",
-                          &sync_words, &stream_type);
-
-        /*if major sync is found*/
-        if ((sync_words == 0xF8726F) && (stream_type == 0xBB)) {
-            /*populate stream parameters from frame's major sync*/
-            mlp_reader->parse(mlp_reader, "4u 4u 4u 4u 11p 5u 48p",
-                              &parameters->group_0_bps,
-                              &parameters->group_1_bps,
-                              &parameters->group_0_rate,
-                              &parameters->group_1_rate,
-                              &parameters->channel_assignment);
-
-            /*rewind to start and frame and exit*/
-            mlp_reader->setpos(mlp_reader, mlp_frame_start);
-            mlp_frame_start->del(mlp_frame_start);
-
-            return bytes_skipped;
-        } else {  /*if major sync is not found*/
-            /*rewind to start of frame*/
-            mlp_reader->setpos(mlp_reader, mlp_frame_start);
-
-            /*advance 1 byte*/
-            mlp_reader->skip(mlp_reader, 8);
-
-            /*and continue looking*/
-            bytes_skipped += 1;
+    /*while no major sync is found*/
+    while (!find_major_sync(mlp_reader, &bytes_skipped)) {
+        if (!enqueue_mlp_packet(packet_reader, mlp_data)) {
+            /*FIXME - ran out of additional packets*/
+            assert(0);
+            break;
         }
     }
+
+    while (mlp_data->size(mlp_data) < 18) {
+        if (!enqueue_mlp_packet(packet_reader, mlp_data)) {
+            /*FIXME - ran out of additional packets*/
+            assert(0);
+            break;
+        }
+    }
+
+    /*finally, grab stream data after major sync*/
+    mlp_frame_start = mlp_reader->getpos(mlp_reader);
+    mlp_reader->parse(mlp_reader,
+                      "4p 12p 16p" /*total frame size (* 2)*/
+                      "24p 8p"     /*sync words, stream type*/
+                      "4u 4u 4u 4u 11p 5u 48p",
+                      &parameters->group_0_bps,
+                      &parameters->group_1_bps,
+                      &parameters->group_0_rate,
+                      &parameters->group_1_rate,
+                      &parameters->channel_assignment);
+    mlp_reader->setpos(mlp_reader, mlp_frame_start);
+    mlp_frame_start->del(mlp_frame_start);
+
+    /*return amount of bytes skipped*/
+    return bytes_skipped;
 }
 
 static unsigned
@@ -1288,32 +1296,12 @@ mlp_data_to_major_sync(Packet_Reader* packet_reader,
 
     /*while no major sync is found*/
     while (!find_major_sync((BitstreamReader*)packet_queue, &bytes_queued)) {
-        /*continue populated queue with packet data*/
-        unsigned sector;
-        BitstreamReader* next_packet =
-            packet_reader_next_audio_packet(packet_reader, &sector);
-        if (!next_packet) {
-            /*ran out of additional packets*/
-            fprintf(stderr, "*** %d Debug: no more additional packets\n",
-                    __LINE__);
+        /*continue populating queue with packet data*/
+        if (!enqueue_mlp_packet(packet_reader, packet_queue)) {
+            /*FIXME - ran out of additional MLP packets*/
+            assert(0);
             break;
         }
-
-        read_audio_packet_header(next_packet, &codec_id, &pad_2_size);
-
-        if (codec_id != MLP_CODEC_ID) {
-            /*codec mismatch in stream*/
-            fprintf(stderr, "*** %d Debug: codec mismatch\n", __LINE__);
-            break;
-        }
-
-        next_packet->skip_bytes(next_packet, pad_2_size);
-
-        next_packet->enqueue(next_packet,
-                             next_packet->size(next_packet),
-                             packet_queue);
-
-        next_packet->close(next_packet);
     }
 
     /*finally, push only data from stream start to major sync to mlp_data*/

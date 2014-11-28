@@ -731,8 +731,7 @@ decode_substream(struct substream* substream,
     substream_reader->byte_align(substream_reader);
     if (substream_reader->size(substream_reader) >= 4) {
         if (substream_reader->read(substream_reader, 32) == 0xD234D234) {
-            fprintf(stderr, "*** %d Debug : end of stream indicated\n",
-                    __LINE__);
+            /*end of stream indicated*/
         }
     }
 
