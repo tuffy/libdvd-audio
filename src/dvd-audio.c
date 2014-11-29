@@ -44,6 +44,32 @@ struct disc_path {
     char *device;
 };
 
+struct ats_XX_0_ifo_track {
+    unsigned index_number;
+    struct {
+        unsigned index;
+        unsigned length;
+    } PTS;
+};
+
+struct ats_XX_0_ifo_index {
+    unsigned first_sector;
+    unsigned last_sector;
+};
+
+struct ats_XX_0_ifo_title {
+    unsigned track_count;
+    unsigned index_count;
+    unsigned PTS_length;
+    struct ats_XX_0_ifo_track track[256];
+    struct ats_XX_0_ifo_index index[256];
+};
+
+struct ats_XX_0_ifo {
+    unsigned title_count;
+    struct ats_XX_0_ifo_title *title;
+};
+
 struct DVDA_s {
     struct disc_path disc;
 
@@ -55,13 +81,7 @@ struct DVDA_Titleset_s {
 
     unsigned titleset_number;
 
-    char *ats_xx_ifo_path;
-    unsigned title_count;
-};
-
-struct DVDA_Index_s {
-    unsigned first_sector;
-    unsigned last_sector;
+    struct ats_XX_0_ifo ifo;
 };
 
 struct DVDA_Title_s {
@@ -69,16 +89,20 @@ struct DVDA_Title_s {
 
     unsigned titleset_number;
     unsigned title_number;
-
     unsigned track_count;
-    unsigned index_count;
     unsigned pts_length;
+
     struct {
-        unsigned index_number;
-        unsigned pts_index;
-        unsigned pts_length;
+        struct {
+            unsigned index;
+            unsigned length;
+        } PTS;
+
+        struct {
+            unsigned first;
+            unsigned last;
+        } sector;
     } tracks[256];
-    DVDA_Index indexes[256];
 };
 
 struct DVDA_Track_s {
@@ -88,10 +112,15 @@ struct DVDA_Track_s {
     unsigned title_number;
     unsigned track_number;
 
-    unsigned pts_index;
-    unsigned pts_length;
+    struct {
+        unsigned index;
+        unsigned length;
+    } PTS;
 
-    DVDA_Index index;
+    struct {
+        unsigned first;
+        unsigned last;
+    } sector;
 };
 
 struct PCM_Track_Reader {
@@ -152,6 +181,26 @@ disc_path_free(struct disc_path *path);
   or 0 if an error occurs opening or parsing the file*/
 static unsigned
 get_titleset_count(const char *audio_ts_ifo);
+
+/*given a BitstreamReader to an ATS_XX_0.IFO file
+  parses the contents to an atx_XX_0_ifo struct
+  returns 1 on success, 0 on failure
+
+  a parsed ats_XX_0_ifo should be freed with free_ats_XX_0_ifo*/
+static int
+parse_ats_XX_0_ifo(BitstreamReader* reader, struct ats_XX_0_ifo *ifo);
+
+static void
+free_ats_XX_0_ifo(struct ats_XX_0_ifo *ifo);
+
+/*given a BitstreamReader positioned at the start of a title
+  in the ATS_XX_0.IFO file, parses the data and populates "title"
+
+  returns 1 on success, 0 on failure*/
+static int
+parse_ats_XX_0_ifo_title(BitstreamReader* reader,
+                         unsigned table_offset,
+                         struct ats_XX_0_ifo_title *title);
 
 
 /******** PCM-based reader and methods ********/
@@ -326,6 +375,7 @@ dvda_open_titleset(DVDA* dvda, unsigned titleset_num)
     FILE *ats_xx_ifo;
     BitstreamReader *bs;
     DVDA_Titleset *titleset;
+    int parsed_ok;
 
     snprintf(ats_xx_ifo_name, 13, "ATS_%2.2d_0.IFO", MIN(titleset_num, 99));
 
@@ -335,8 +385,11 @@ dvda_open_titleset(DVDA* dvda, unsigned titleset_num)
         return NULL;
     }
 
-    if ((ats_xx_ifo = fopen(ats_xx_ifo_path, "rb")) == NULL) {
-        free(ats_xx_ifo_path);
+    ats_xx_ifo = fopen(ats_xx_ifo_path, "rb");
+
+    free(ats_xx_ifo_path);
+
+    if (!ats_xx_ifo) {
         return NULL;
     }
 
@@ -346,38 +399,19 @@ dvda_open_titleset(DVDA* dvda, unsigned titleset_num)
 
     titleset->titleset_number = titleset_num;
 
-    titleset->ats_xx_ifo_path = ats_xx_ifo_path;
-    titleset->title_count = 0;  /*placeholder*/
-
     bs = br_open(ats_xx_ifo, BS_BIG_ENDIAN);
-    if (!setjmp(*br_try(bs))) {
-        uint8_t identifier[12];
-        const uint8_t dvdaudio_ats[12] =
-            {68, 86, 68, 65, 85, 68, 73, 79, 45, 65, 84, 83};
-        unsigned last_byte_address;
 
-        bs->read_bytes(bs, identifier, 12);
+    parsed_ok = parse_ats_XX_0_ifo(bs, &titleset->ifo);
 
-        if (memcmp(identifier, dvdaudio_ats, 12)) {
-            /*some identifier mismatch*/
-            br_abort(bs);
-        }
+    bs->close(bs);
 
-        bs->seek(bs, SECTOR_SIZE, BS_SEEK_SET);
-
-        bs->parse(bs, "16u 16p 32u",
-                  &titleset->title_count, &last_byte_address);
-
-        br_etry(bs);
-        bs->close(bs);
-
-        return titleset;
-    } else {
-        br_etry(bs);
-        bs->close(bs);
-        dvda_close_titleset(titleset);
+    if (!parsed_ok) {
+        disc_path_free(&titleset->disc);
+        free(titleset);
         return NULL;
     }
+
+    return titleset;
 }
 
 void
@@ -385,7 +419,7 @@ dvda_close_titleset(DVDA_Titleset* titleset)
 {
     disc_path_free(&titleset->disc);
 
-    free(titleset->ats_xx_ifo_path);
+    free_ats_XX_0_ifo(&titleset->ifo);
 
     free(titleset);
 }
@@ -399,99 +433,73 @@ dvda_titleset_number(const DVDA_Titleset* titleset)
 unsigned
 dvda_title_count(const DVDA_Titleset* titleset)
 {
-    return titleset->title_count;
+    return titleset->ifo.title_count;
 }
 
 DVDA_Title*
 dvda_open_title(DVDA_Titleset* titleset, unsigned title_num)
 {
-    FILE *ats_xx_ifo = fopen(titleset->ats_xx_ifo_path, "rb");
-    BitstreamReader *bs;
-    unsigned title_count;
-    unsigned i;
     DVDA_Title* title;
+    struct ats_XX_0_ifo_title *ifo_title;
+    unsigned i;
 
-    if (!ats_xx_ifo) {
+    if ((title_num == 0) || (title_num > titleset->ifo.title_count)) {
         return NULL;
     }
 
-    bs = br_open(ats_xx_ifo, BS_BIG_ENDIAN);
+    ifo_title = &(titleset->ifo.title[title_num - 1]);
+
     title = malloc(sizeof(DVDA_Title));
 
     disc_path_copy(&titleset->disc, &title->disc);
 
     title->titleset_number = titleset->titleset_number;
     title->title_number = title_num;
+    title->track_count = ifo_title->track_count;
+    title->pts_length = ifo_title->PTS_length;
 
-    title->track_count = 0; /*placeholder*/
-    title->index_count = 0; /*placeholder*/
-    title->pts_length = 0; /*placeholder*/
+    for (i = 0; i < ifo_title->track_count; i++) {
+        struct ats_XX_0_ifo_track *track =
+            &ifo_title->track[i];
+        struct ats_XX_0_ifo_index *index =
+            &ifo_title->index[track->index_number - 1];
+        const unsigned track_num = i + 1;
+        const int last_track = (track_num == ifo_title->track_count);
 
-    if (!setjmp(*br_try(bs))) {
-        bs->seek(bs, SECTOR_SIZE, BS_SEEK_SET);
-        bs->parse(bs, "16u 16p 32p", &title_count);
-        assert(title_count == titleset->title_count);
-        for (i = 0; i < title_count; i++) {
-            unsigned title_number;
-            unsigned title_table_offset;
-            bs->parse(bs, "8u 24p 32u", &title_number, &title_table_offset);
-            /*ignore title number in stream and use the index*/
-            if (title_num == (i + 1)) {
-                unsigned sector_pointers_offset;
-                unsigned i;
+        title->tracks[i].PTS.index = track->PTS.index;
+        title->tracks[i].PTS.length = track->PTS.length;
+        title->tracks[i].sector.first = index->first_sector;
+        if (last_track) {
+            const int last_title = (title_num == titleset->ifo.title_count);
+            if (last_title) {
+                /*may need to count sectors in AOBs*/
+                title->tracks[i].sector.last = index->last_sector;
+            } else {
+                struct ats_XX_0_ifo_title *next_title =
+                    &(titleset->ifo.title[title_num]);
+                if (next_title->track_count) {
+                    struct ats_XX_0_ifo_track *next_track =
+                        &next_title->track[0];
+                    struct ats_XX_0_ifo_index *next_index =
+                        &next_title->index[next_track->index_number - 1];
 
-                bs->seek(bs, SECTOR_SIZE + title_table_offset, BS_SEEK_SET);
-                bs->parse(bs, "16p 8u 8u 32u 32p 16u 16p",
-                          &title->track_count,
-                          &title->index_count,
-                          &title->pts_length,
-                          &sector_pointers_offset);
-
-                /*populate tracks*/
-                for (i = 0; i < title->track_count; i++) {
-                    bs->parse(bs, "32p 8u 8p 32u 32u 48p",
-                              &(title->tracks[i].index_number),
-                              &(title->tracks[i].pts_index),
-                              &(title->tracks[i].pts_length));
+                    title->tracks[i].sector.last = next_index->first_sector - 1;
+                } else {
+                    /*next title has no tracks - this shouldn't happen*/
+                    title->tracks[i].sector.last = index->last_sector;
                 }
-
-                /*populate indexes*/
-                bs->seek(bs,
-                         SECTOR_SIZE +
-                         title_table_offset +
-                         sector_pointers_offset,
-                         BS_SEEK_SET);
-                for (i = 0; i < title->index_count; i++) {
-                    unsigned index_id;
-                    bs->parse(bs, "32u 32u 32u",
-                              &index_id,
-                              &(title->indexes[i].first_sector),
-                              &(title->indexes[i].last_sector));
-                    if (index_id != 0x1000000) {
-                        /*invalid index ID*/
-                        br_abort(bs);
-                    }
-                }
-
-                br_etry(bs);
-                bs->close(bs);
-
-                return title;
             }
-        }
+        } else {
+            struct ats_XX_0_ifo_track *next_track =
+                &ifo_title->track[i + 1];
+            struct ats_XX_0_ifo_index *next_index =
+                &ifo_title->index[next_track->index_number - 1];
 
-        /*title not found*/
-        br_etry(bs);
-        bs->close(bs);
-        dvda_close_title(title);
-        return NULL;
-    } else {
-        /*some I/O or parse error reading ATS_XX_0.IFO*/
-        br_etry(bs);
-        bs->close(bs);
-        dvda_close_title(title);
-        return NULL;
+            title->tracks[i].sector.last = next_index->first_sector - 1;
+        }
     }
+
+    return title;
 }
 
 void
@@ -526,6 +534,7 @@ dvda_open_track(DVDA_Title* title, unsigned track_num)
     DVDA_Track* track;
 
     if ((track_num == 0) || (track_num > title->track_count)) {
+        /*track_num out of range*/
         return NULL;
     }
 
@@ -537,12 +546,13 @@ dvda_open_track(DVDA_Title* title, unsigned track_num)
     track->title_number = title->title_number;
     track->track_number = track_num;
 
-    track->pts_index =
-        title->tracks[track_num - 1].pts_index;
-    track->pts_length =
-        title->tracks[track_num - 1].pts_length;
-    track->index =
-        title->indexes[title->tracks[track_num - 1].index_number - 1];
+    /*converted 1-based track_num to 0-based track_num*/
+    track_num -= 1;
+
+    track->PTS.index = title->tracks[track_num].PTS.index;
+    track->PTS.length = title->tracks[track_num].PTS.length;
+    track->sector.first = title->tracks[track_num].sector.first;
+    track->sector.last = title->tracks[track_num].sector.last;
 
     return track;
 }
@@ -564,25 +574,25 @@ dvda_track_number(const DVDA_Track* track)
 unsigned
 dvda_track_pts_index(const DVDA_Track* track)
 {
-    return track->pts_index;
+    return track->PTS.index;
 }
 
 unsigned
 dvda_track_pts_length(const DVDA_Track* track)
 {
-    return track->pts_length;
+    return track->PTS.length;
 }
 
 unsigned
 dvda_track_first_sector(const DVDA_Track* track)
 {
-    return track->index.first_sector;
+    return track->sector.first;
 }
 
 unsigned
 dvda_track_last_sector(const DVDA_Track* track)
 {
-    return track->index.last_sector;
+    return track->sector.last;
 }
 
 DVDA_Track_Reader*
@@ -604,7 +614,7 @@ dvda_open_track_reader(const DVDA_Track* track)
     }
 
     /*seek to the track's first sector*/
-    if (aob_reader_seek(aob_reader, track->index.first_sector)) {
+    if (aob_reader_seek(aob_reader, track->sector.first)) {
         aob_reader_close(aob_reader);
         return NULL;
     }
@@ -627,13 +637,13 @@ dvda_open_track_reader(const DVDA_Track* track)
     case PCM_CODEC_ID:
         track_reader = open_pcm_track_reader(packet_reader,
                                              audio_packet,
-                                             track->pts_length,
+                                             track->PTS.length,
                                              pad_2_size);
         break;
     case MLP_CODEC_ID:
         track_reader = open_mlp_track_reader(packet_reader,
                                              audio_packet,
-                                             track->index.last_sector,
+                                             track->sector.last,
                                              pad_2_size);
         break;
     default:  /*unknown codec ID*/
@@ -846,6 +856,108 @@ get_titleset_count(const char *audio_ts_ifo)
         bs->close(bs);
         return 0;
     }
+}
+
+static int
+parse_ats_XX_0_ifo(BitstreamReader* bs, struct ats_XX_0_ifo *ifo)
+{
+    ifo->title = NULL;
+
+    if (!setjmp(*br_try(bs))) {
+        uint8_t identifier[12];
+        const uint8_t dvdaudio_ats[12] =
+            {68, 86, 68, 65, 85, 68, 73, 79, 45, 65, 84, 83};
+        unsigned i;
+
+        bs->read_bytes(bs, identifier, 12);
+
+        if (memcmp(identifier, dvdaudio_ats, 12)) {
+            /*some identifier mismatch*/
+            br_abort(bs);
+        }
+
+        bs->seek(bs, SECTOR_SIZE, BS_SEEK_SET);
+
+        bs->parse(bs, "16u 16p 32p", &ifo->title_count);
+
+        ifo->title = malloc(ifo->title_count *
+                            sizeof(struct ats_XX_0_ifo_title));
+
+        for (i = 0; i < ifo->title_count; i++) {
+            unsigned title_number;
+            unsigned title_table_offset;
+            br_pos_t *current_pos;
+
+            bs->parse(bs, "8u 24p 32u", &title_number, &title_table_offset);
+            current_pos = bs->getpos(bs);
+            bs->seek(bs, SECTOR_SIZE + title_table_offset, BS_SEEK_SET);
+            if (parse_ats_XX_0_ifo_title(bs,
+                                         title_table_offset,
+                                         &ifo->title[i])) {
+                bs->setpos(bs, current_pos);
+                current_pos->del(current_pos);
+            } else {
+                /*some error parsing table*/
+                current_pos->del(current_pos);
+                br_abort(bs);
+            }
+        }
+
+        br_etry(bs);
+        return 1;
+    } else {
+        br_etry(bs);
+        free(ifo->title);
+        return 0;
+    }
+}
+
+static void
+free_ats_XX_0_ifo(struct ats_XX_0_ifo *ifo)
+{
+    free(ifo->title);
+}
+
+static int
+parse_ats_XX_0_ifo_title(BitstreamReader* reader,
+                         unsigned table_offset,
+                         struct ats_XX_0_ifo_title *title)
+{
+    unsigned i;
+    unsigned sector_pointers_offset;
+
+    reader->parse(reader, "16p 8u 8u 32u 32p 16u 16p",
+                  &title->track_count,
+                  &title->index_count,
+                  &title->PTS_length,
+                  &sector_pointers_offset);
+
+    /*populate tracks*/
+    for (i = 0; i < title->track_count; i++) {
+        reader->parse(reader, "32p 8u 8p 32u 32u 48p",
+                      &title->track[i].index_number,
+                      &title->track[i].PTS.index,
+                      &title->track[i].PTS.length);
+    }
+
+    /*populate indexes*/
+    reader->seek(reader,
+                 SECTOR_SIZE + table_offset + sector_pointers_offset,
+                 BS_SEEK_SET);
+    for (i = 0; i < title->index_count; i++) {
+        unsigned index_id;
+
+        reader->parse(reader, "32u 32u 32u",
+                      &index_id,
+                      &title->index[i].first_sector,
+                      &title->index[i].last_sector);
+
+        if (index_id != 0x1000000) {
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 static DVDA_Track_Reader*
