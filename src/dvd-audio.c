@@ -481,7 +481,8 @@ dvda_open_title(DVDA_Titleset* titleset, unsigned title_num)
                     struct ats_XX_0_ifo_index *next_index =
                         &next_title->index[next_track->index_number - 1];
 
-                    title->tracks[i].sector.last = next_index->first_sector - 1;
+                    title->tracks[i].sector.last =
+                        MAX(next_index->first_sector - 1, index->last_sector);
                 } else {
                     /*next title has no tracks - this shouldn't happen*/
                     title->tracks[i].sector.last = index->last_sector;

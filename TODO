@@ -1,5 +1,5 @@
 # -*- Mode: Org -*-
-* TODO Finish version 1.0
+* DONE Finish version 1.0
 ** DONE Construct basic API
 ** DONE Add PCM decoding support
 ** DONE Add MLP decoding support
@@ -77,7 +77,7 @@
 
    Tracks will be handled correctly to match the API this time around
    via as much stream probing as it takes.
-** TODO Handle end of tracks correctly
+** DONE Handle end of tracks correctly
    I'd been converting PTS ticks to PCM frames and using that as the total track
    length, but that's not quite right either.
 

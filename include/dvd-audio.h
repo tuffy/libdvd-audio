@@ -32,7 +32,7 @@ VERSION_STR(major) "." VERSION_STR(minor) "." VERSION_STR(release) extra
 LIBDVDAUDIO_MKVERSION(LIBDVDAUDIO_MAJOR_VERSION, \
                       LIBDVDAUDIO_MINOR_VERSION, \
                       LIBDVDAUDIO_RELEASE_VERSION, \
-                      " beta 1")
+                      "")
 
 #define PTS_PER_SECOND 90000
 
