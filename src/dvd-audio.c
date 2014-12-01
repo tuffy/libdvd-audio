@@ -194,10 +194,8 @@ static void
 free_ats_XX_0_ifo(struct ats_XX_0_ifo *ifo);
 
 /*given a BitstreamReader positioned at the start of a title
-  in the ATS_XX_0.IFO file, parses the data and populates "title"
-
-  returns 1 on success, 0 on failure*/
-static int
+  in the ATS_XX_0.IFO file, parses the data and populates "title"*/
+static void
 parse_ats_XX_0_ifo_title(BitstreamReader* reader,
                          unsigned table_offset,
                          struct ats_XX_0_ifo_title *title);
@@ -891,16 +889,11 @@ parse_ats_XX_0_ifo(BitstreamReader* bs, struct ats_XX_0_ifo *ifo)
             bs->parse(bs, "8u 24p 32u", &title_number, &title_table_offset);
             current_pos = bs->getpos(bs);
             bs->seek(bs, SECTOR_SIZE + title_table_offset, BS_SEEK_SET);
-            if (parse_ats_XX_0_ifo_title(bs,
-                                         title_table_offset,
-                                         &ifo->title[i])) {
-                bs->setpos(bs, current_pos);
-                current_pos->del(current_pos);
-            } else {
-                /*some error parsing table*/
-                current_pos->del(current_pos);
-                br_abort(bs);
-            }
+            parse_ats_XX_0_ifo_title(bs,
+                                     title_table_offset,
+                                     &ifo->title[i]);
+            bs->setpos(bs, current_pos);
+            current_pos->del(current_pos);
         }
 
         br_etry(bs);
@@ -908,6 +901,7 @@ parse_ats_XX_0_ifo(BitstreamReader* bs, struct ats_XX_0_ifo *ifo)
     } else {
         br_etry(bs);
         free(ifo->title);
+        fprintf(stderr, "I/O error\n");
         return 0;
     }
 }
@@ -918,7 +912,7 @@ free_ats_XX_0_ifo(struct ats_XX_0_ifo *ifo)
     free(ifo->title);
 }
 
-static int
+static void
 parse_ats_XX_0_ifo_title(BitstreamReader* reader,
                          unsigned table_offset,
                          struct ats_XX_0_ifo_title *title)
@@ -951,13 +945,7 @@ parse_ats_XX_0_ifo_title(BitstreamReader* reader,
                       &index_id,
                       &title->index[i].first_sector,
                       &title->index[i].last_sector);
-
-        if (index_id != 0x1000000) {
-            return 0;
-        }
     }
-
-    return 1;
 }
 
 static DVDA_Track_Reader*
