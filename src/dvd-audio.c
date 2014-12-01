@@ -663,31 +663,31 @@ dvda_close_track_reader(DVDA_Track_Reader* reader)
 }
 
 dvda_codec_t
-dvda_codec(DVDA_Track_Reader* reader)
+dvda_codec(const DVDA_Track_Reader* reader)
 {
     return reader->codec;
 }
 
 unsigned
-dvda_bits_per_sample(DVDA_Track_Reader* reader)
+dvda_bits_per_sample(const DVDA_Track_Reader* reader)
 {
     return unpack_bits_per_sample(reader->parameters.group_0_bps);
 }
 
 unsigned
-dvda_sample_rate(DVDA_Track_Reader* reader)
+dvda_sample_rate(const DVDA_Track_Reader* reader)
 {
     return unpack_sample_rate(reader->parameters.group_0_rate);
 }
 
 unsigned
-dvda_channel_count(DVDA_Track_Reader* reader)
+dvda_channel_count(const DVDA_Track_Reader* reader)
 {
     return unpack_channel_count(reader->parameters.channel_assignment);
 }
 
 unsigned
-dvda_riff_wave_channel_mask(DVDA_Track_Reader *reader)
+dvda_riff_wave_channel_mask(const DVDA_Track_Reader *reader)
 {
     enum { fL=0x001,
            fR=0x002,

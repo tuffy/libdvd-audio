@@ -271,24 +271,24 @@ Track Reader Functions
    Closes the :type:`DVDA_Track_Reader` along with any file handles
    or memory it may have.
 
-.. function:: dvda_codec_t dvda_codec(DVDA_Track_Reader *reader)
+.. function:: dvda_codec_t dvda_codec(const DVDA_Track_Reader *reader)
 
    Returns the reader's codec, such as ``DVDA_PCM`` or ``DVDA_MLP``.
    This is purely for informative purposes.
 
-.. function:: unsigned dvda_bits_per_sample(DVDA_Track_Reader *reader)
+.. function:: unsigned dvda_bits_per_sample(const DVDA_Track_Reader *reader)
 
    Returns the reader's bits-per-sample - either 24 or 16.
 
-.. function:: unsigned dvda_sample_rate(DVDA_Track_Reader *reader)
+.. function:: unsigned dvda_sample_rate(const DVDA_Track_Reader *reader)
 
    Returns the reader's sample rate, in Hz.
 
-.. function:: unsigned dvda_channel_count(DVDA_Track_Reader *reader)
+.. function:: unsigned dvda_channel_count(const DVDA_Track_Reader *reader)
 
    Returns the reader's number of channels - often 2 or 6.
 
-.. function:: unsigned dvda_riff_wave_channel_mask(DVDA_Track_Reader *reader)
+.. function:: unsigned dvda_riff_wave_channel_mask(const DVDA_Track_Reader *reader)
 
    Returns the reader's channel mask as a 32-bit value.
    Each set bit indicates the presence of the given channel:

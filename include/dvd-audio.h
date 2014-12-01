@@ -164,23 +164,23 @@ dvda_close_track_reader(DVDA_Track_Reader* reader);
 
 /*returns the track's codec, such as PCM or MLP*/
 dvda_codec_t
-dvda_codec(DVDA_Track_Reader* reader);
+dvda_codec(const DVDA_Track_Reader* reader);
 
 /*returns the track's bits-per-sample (16 or 24)*/
 unsigned
-dvda_bits_per_sample(DVDA_Track_Reader* reader);
+dvda_bits_per_sample(const DVDA_Track_Reader* reader);
 
 /*returns the track's sample rate in Hz*/
 unsigned
-dvda_sample_rate(DVDA_Track_Reader* reader);
+dvda_sample_rate(const DVDA_Track_Reader* reader);
 
 /*returns the track's number of channels*/
 unsigned
-dvda_channel_count(DVDA_Track_Reader* reader);
+dvda_channel_count(const DVDA_Track_Reader* reader);
 
 /*returns a 32-bit RIFF WAVE channel mask*/
 unsigned
-dvda_riff_wave_channel_mask(DVDA_Track_Reader *reader);
+dvda_riff_wave_channel_mask(const DVDA_Track_Reader *reader);
 
 /*given a buffer with at least:
 
