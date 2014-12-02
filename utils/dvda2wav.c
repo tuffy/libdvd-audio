@@ -38,10 +38,12 @@ extract_tracks(DVDA* dvda, DVDA_Title* title,
 
 void
 extract_track(DVDA* dvda, DVDA_Title* title,
-              unsigned track_num, const char *output_dir);
+              unsigned track_num,
+              const char *output_dir);
 
 void
-extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path);
+extract_track_data(DVDA_Track_Reader* track_reader,
+                   const char *output_path);
 
 void
 write_wave_header(BitstreamWriter* output,
@@ -247,7 +249,8 @@ extract_tracks(DVDA* dvda, DVDA_Title* title,
 
 void
 extract_track(DVDA* dvda, DVDA_Title* title,
-              unsigned track_num, const char *output_dir)
+              unsigned track_num,
+              const char *output_dir)
 {
     DVDA_Track* track = dvda_open_track(title, track_num);
     DVDA_Track_Reader* track_reader;
@@ -281,7 +284,8 @@ extract_track(DVDA* dvda, DVDA_Title* title,
 }
 
 void
-extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path)
+extract_track_data(DVDA_Track_Reader* track_reader,
+                   const char *output_path)
 {
     FILE *output_file;
     BitstreamWriter *output;
@@ -299,7 +303,7 @@ extract_track_data(DVDA_Track_Reader* track_reader, const char *output_path)
         return;
     }
 
-    printf("Extracting %s track  %u channels  %u Hz  %u bps\n",
+    printf("* Extracting %s track  %u channels  %u Hz  %u bps\n",
            (dvda_codec(track_reader) == DVDA_MLP ? "MLP" : "PCM"),
            dvda_channel_count(track_reader),
            dvda_sample_rate(track_reader),

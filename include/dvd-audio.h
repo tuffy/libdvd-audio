@@ -25,14 +25,13 @@
 
 #define TO_STR(x) #x
 #define VERSION_STR(x) TO_STR(x)
-#define LIBDVDAUDIO_MKVERSION(major, minor, release, extra) \
-VERSION_STR(major) "." VERSION_STR(minor) "." VERSION_STR(release) extra
+#define LIBDVDAUDIO_MKVERSION(major, minor, release) \
+VERSION_STR(major) "." VERSION_STR(minor) "." VERSION_STR(release)
 
 #define LIBDVDAUDIO_VERSION_STRING \
 LIBDVDAUDIO_MKVERSION(LIBDVDAUDIO_MAJOR_VERSION, \
                       LIBDVDAUDIO_MINOR_VERSION, \
-                      LIBDVDAUDIO_RELEASE_VERSION, \
-                      "")
+                      LIBDVDAUDIO_RELEASE_VERSION)
 
 #define PTS_PER_SECOND 90000
 
