@@ -47,7 +47,7 @@ struct AOB_Reader_s {
 };
 
 /*******************************************************************
- *                   private function definitions                  *
+ *                    private function signatures                  *
  *******************************************************************/
 
 /*returns 0 on success, 1 on failure*/

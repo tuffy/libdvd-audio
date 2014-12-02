@@ -158,7 +158,7 @@ struct DVDA_Track_Reader_s {
 };
 
 /*******************************************************************
- *                   private function definitions                  *
+ *                    private function signatures                  *
  *******************************************************************/
 
 /*initializes a disc_path structure with the given paths*/

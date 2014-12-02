@@ -133,7 +133,7 @@ struct checkdata {
 };
 
 /*******************************************************************
- *                   private function definitions                  *
+ *                    private function signatures                  *
  *******************************************************************/
 
 static unsigned
@@ -1145,6 +1145,8 @@ decode_residual_data(BitstreamReader* sr,
     unsigned c;
     unsigned m;
     unsigned i;
+    br_read_f read = sr->read;
+    br_read_huffman_code_f read_huffman_code = sr->read_huffman_code;
 
     /*calculate signed Huffman offset for each channel*/
     for (c = min_channel; c <= max_channel; c++) {
@@ -1211,13 +1213,13 @@ decode_residual_data(BitstreamReader* sr,
                 MSB = 0;
                 break;
             case 1:
-                MSB = sr->read_huffman_code(sr, mlp_codebook1);
+                MSB = read_huffman_code(sr, mlp_codebook1);
                 break;
             case 2:
-                MSB = sr->read_huffman_code(sr, mlp_codebook2);
+                MSB = read_huffman_code(sr, mlp_codebook2);
                 break;
             case 3:
-                MSB = sr->read_huffman_code(sr, mlp_codebook3);
+                MSB = read_huffman_code(sr, mlp_codebook3);
                 break;
             default:
                 MSB = -1;
@@ -1226,7 +1228,7 @@ decode_residual_data(BitstreamReader* sr,
             if (MSB == -1)
                 return 0;
 
-            LSB = sr->read(sr, LSB_bits[c]);
+            LSB = read(sr, LSB_bits[c]);
 
             a_append(residual,
                      ((MSB << LSB_bits[c]) +
