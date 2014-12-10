@@ -9,6 +9,14 @@ huffman.o \
 func_io.o \
 mini-gmp.o
 
+BITSTREAM_TABLES = \
+src/read_bits_table_be.h \
+src/read_bits_table_le.h \
+src/read_unary_table_be.h \
+src/read_unary_table_le.h \
+src/unread_bit_table_be.h \
+src/unread_bit_table_le.h
+
 DVDA_OBJS = dvd-audio.o \
 aob.o \
 packet.o \
@@ -65,7 +73,7 @@ install: $(STATIC_LIBRARY) $(SHARED_LIBRARIES) $(BINARIES) $(PKG_CONFIG_METADATA
 	install -m 644 $(PKG_CONFIG_METADATA) $(PKG_CONFIG_DIR)
 
 clean:
-	rm -f $(BINARIES) $(CODEBOOKS) $(BINARIES) $(PKG_CONFIG_METADATA) huffman *.o *.a *.so*
+	rm -f $(BINARIES) $(CODEBOOKS) $(BITSTREAM_TABLES) $(BINARIES) $(PKG_CONFIG_METADATA) huffman bitstream-table *.o *.a *.so*
 
 libdvd-audio.a: $(DVDA_OBJS)
 	$(AR) -r $@ $(DVDA_OBJS)
@@ -127,7 +135,7 @@ $(PKG_CONFIG_METADATA): libdvd-audio.pc.m4
 huffman: src/huffman.c src/huffman.h parson.o
 	$(CC) $(FLAGS) -o huffman src/huffman.c parson.o -DEXECUTABLE
 
-bitstream.o: src/bitstream.c src/bitstream.h
+bitstream.o: src/bitstream.c src/bitstream.h $(BITSTREAM_TABLES)
 	$(CC) $(FLAGS) -c src/bitstream.c
 
 array.o: src/array.h src/array.c
@@ -145,7 +153,7 @@ mini-gmp.o: src/mini-gmp.c src/mini-gmp.h
 bitstream.a: $(BITSTREAM_OBJS)
 	$(AR) -r $@ $(BITSTREAM_OBJS)
 
-bitstream: src/bitstream.c src/bitstream.h huffman.o func_io.o mini-gmp.o
+bitstream: src/bitstream.c src/bitstream.h huffman.o func_io.o mini-gmp.o $(BITSTREAM_TABLES)
 	$(CC) $(FLAGS) src/bitstream.c huffman.o func_io.o mini-gmp.o -DEXECUTABLE -o $@
 
 array: src/array.c src/array.h
@@ -153,3 +161,24 @@ array: src/array.c src/array.h
 
 parson.o: src/parson.c src/parson.h
 	$(CC) $(FLAGS) -c src/parson.c
+
+bitstream-table: src/bitstream-table.c array.o
+	$(CC) $(FLAGS) -o $@ src/bitstream-table.c array.o
+
+src/read_bits_table_be.h: bitstream-table
+	./bitstream-table --rb --be > $@
+
+src/read_bits_table_le.h: bitstream-table
+	./bitstream-table --rb --le > $@
+
+src/read_unary_table_be.h: bitstream-table
+	./bitstream-table --ru --be > $@
+
+src/read_unary_table_le.h: bitstream-table
+	./bitstream-table --ru --le > $@
+
+src/unread_bit_table_be.h: bitstream-table
+	./bitstream-table --urb --be > $@
+
+src/unread_bit_table_le.h: bitstream-table
+	./bitstream-table --urb --le > $@
